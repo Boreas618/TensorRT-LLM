@@ -144,7 +144,8 @@ class OpenaiWorker(Worker):
 
         # Make the API call
         try:
-            response = await self.async_client.completions.create(**params)
+            response = await self.async_client.completions.create(
+                max_completion_tokens=task.max_tokens, **params)
             self.fill_generation_task_with_response(task, response)
 
             return TaskStatus.SUCCESS
