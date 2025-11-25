@@ -1,6 +1,7 @@
 from ..disaggregated_params import DisaggregatedParams
 from ..executor import CompletionOutput, LoRARequest, RequestError
 from ..sampling_params import GuidedDecodingParams, SamplingParams
+from ..scheduling_params import SchedulingParams
 from .build_cache import BuildCacheConfig
 from .llm import LLM, RequestOutput
 # yapf: disable
@@ -64,4 +65,5 @@ __all__ = [
     'SaveHiddenStatesDecodingConfig',
     'RocketSparseAttentionConfig',
     'DeepSeekSparseAttentionConfig',
+    'SchedulingParams',
 ]

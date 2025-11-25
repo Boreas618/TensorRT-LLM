@@ -700,6 +700,10 @@ def executor_request_to_llm_request(
         mrope_rotary_cos_sin = executor_request.mrope_config.mrope_rotary_cos_sin
         mrope_position_deltas = executor_request.mrope_config.mrope_position_deltas
 
+    agent_hierarchy = None
+    if getattr(executor_request, "py_scheduling_params", None) is not None:
+        agent_hierarchy = executor_request.py_scheduling_params.agent_hierarchy
+
     llm_request = LlmRequest(
         request_id=req_id,
         max_new_tokens=executor_request.max_tokens,
@@ -765,7 +769,8 @@ def executor_request_to_llm_request(
         arrival_time=getattr(executor_request, "py_arrival_time", None),
         py_multimodal_data=getattr(executor_request, "py_multimodal_data",
                                    None),
-        kv_cache_retention_config=executor_request.kv_cache_retention_config)
+        kv_cache_retention_config=executor_request.kv_cache_retention_config,
+        agent_hierarchy=agent_hierarchy)
     if child_req_ids:
         for child_id in child_req_ids:
             llm_request.create_child_request(child_id)

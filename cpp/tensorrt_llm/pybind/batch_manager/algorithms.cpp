@@ -49,12 +49,14 @@ using namespace tensorrt_llm::batch_manager;
 void tensorrt_llm::pybind::batch_manager::algorithms::initBindings(pybind11::module_& m)
 {
     py::class_<CapacityScheduler>(m, CapacityScheduler::name)
-        .def(py::init<SizeType32, executor::CapacitySchedulerPolicy, bool, bool, LlmRequestState, LlmRequestState>(),
+        .def(py::init<SizeType32, executor::CapacitySchedulerPolicy, bool, bool, LlmRequestState, LlmRequestState,
+                 float, std::optional<std::vector<std::string>>>(),
             py::arg("max_num_requests"), py::arg("capacity_scheduler_policy"), py::arg("has_kv_cache_manager"),
             py::arg("two_step_lookahead") = false,
             py::arg_v("no_schedule_until_state", LlmRequestState::kCONTEXT_INIT, "LlmRequestState.CONTEXT_INIT"),
             py::arg_v("no_schedule_after_state", LlmRequestState::kGENERATION_COMPLETE,
-                "LlmRequestState.GENERATION_COMPLETE"))
+                "LlmRequestState.GENERATION_COMPLETE"),
+            py::arg("agent_percentage") = 0.0, py::arg("agent_types") = std::nullopt)
         .def("__call__", &CapacityScheduler::operator(), py::arg("active_requests"),
             py::arg("kv_cache_manager") = nullptr, py::arg("peft_cache_manager") = nullptr,
             py::arg("cross_kv_cache_manager") = nullptr)
