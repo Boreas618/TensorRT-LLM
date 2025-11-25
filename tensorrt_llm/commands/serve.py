@@ -98,6 +98,8 @@ def get_llm_args(
         fail_fast_on_attention_window_too_large: bool = False,
         otlp_traces_endpoint: Optional[str] = None,
         enable_chunked_prefill: bool = False,
+        agent_percentage: float = 0.0,
+        agent_types: Optional[str] = None,
         **llm_args_extra_dict: Any):
 
     if gpus_per_node is None:
@@ -119,6 +121,7 @@ def get_llm_args(
         capacity_scheduler_policy=CapacitySchedulerPolicy.GUARANTEED_NO_EVICT,
         dynamic_batch_config=dynamic_batch_config,
     )
+    agent_types = agent_types.split(';') if agent_types else None
     llm_args = {
         "model": model,
         "scheduler_config": scheduler_config,
@@ -142,6 +145,8 @@ def get_llm_args(
         fail_fast_on_attention_window_too_large,
         "otlp_traces_endpoint": otlp_traces_endpoint,
         "enable_chunked_prefill": enable_chunked_prefill,
+        "agent_percentage": agent_percentage,
+        "agent_types": agent_types,
     }
 
     return llm_args, llm_args_extra_dict
@@ -353,6 +358,18 @@ class ChoiceWithAlias(click.Choice):
               type=str,
               default=None,
               help="Keyword arguments for media I/O.")
+@click.option(
+    "--agent_percentage",
+    type=float,
+    default=0.0,
+    help=
+    "The percentage of agent requests to schedule. Defaults to 0.0. Should be between 0.0 and 1.0."
+)
+@click.option(
+    "--agent_types",
+    type=str,
+    default=None,
+    help="Types of agents to schedule. Now Only Support DeepResearchAgent.")
 def serve(
         model: str, tokenizer: Optional[str], host: str, port: int,
         log_level: str, backend: str, max_beam_width: int, max_batch_size: int,
@@ -365,7 +382,8 @@ def serve(
         server_role: Optional[str],
         fail_fast_on_attention_window_too_large: bool,
         otlp_traces_endpoint: Optional[str], enable_chunked_prefill: bool,
-        disagg_cluster_uri: Optional[str], media_io_kwargs: Optional[str]):
+        disagg_cluster_uri: Optional[str], media_io_kwargs: Optional[str],
+        agent_percentage: float, agent_types: Optional[str]):
     """Running an OpenAI API compatible server
 
     MODEL: model name | HF checkpoint path | TensorRT engine path
@@ -392,7 +410,9 @@ def serve(
         fail_fast_on_attention_window_too_large=
         fail_fast_on_attention_window_too_large,
         otlp_traces_endpoint=otlp_traces_endpoint,
-        enable_chunked_prefill=enable_chunked_prefill)
+        enable_chunked_prefill=enable_chunked_prefill,
+        agent_percentage=agent_percentage,
+        agent_types=agent_types)
 
     llm_args_extra_dict = {}
     if extra_llm_api_options is not None:

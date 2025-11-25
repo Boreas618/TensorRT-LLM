@@ -2594,6 +2594,20 @@ class TorchLlmArgs(BaseLlmArgs):
         "Only enable it if you intend to use this feature.",
         status="prototype")
 
+    agent_percentage: float = Field(
+        default=0.0,
+        description=
+        "The percentage of agent requests to schedule. Defaults to 0.0. Should be between 0.0 and 1.0.",
+        status="prototype",
+    )
+
+    agent_types: Optional[List[str]] = Field(
+        default=None,
+        description=
+        "Types of agents to schedule. Now Only Support agent_deep_research.",
+        status="prototype",
+    )
+
     # PrivateVars
     _quant_config: Optional[QuantConfig] = PrivateAttr(default=None)
 
@@ -2909,6 +2923,8 @@ class TorchLlmArgs(BaseLlmArgs):
             batch_wait_timeout_iters=self.batch_wait_timeout_iters,
             batch_wait_max_tokens_ratio=self.batch_wait_max_tokens_ratio,
             enable_sleep=self.enable_sleep,
+            agent_percentage=self.agent_percentage,
+            agent_types=self.agent_types,
         )
 
 
