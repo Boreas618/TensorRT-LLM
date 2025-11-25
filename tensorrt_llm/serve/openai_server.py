@@ -37,7 +37,7 @@ from tensorrt_llm.inputs.data import TokensPrompt
 from tensorrt_llm.inputs.multimodal import MultimodalServerConfig
 from tensorrt_llm.inputs.utils import ConversationMessage, apply_chat_template
 from tensorrt_llm.llmapi import DisaggregatedParams as LlmDisaggregatedParams
-from tensorrt_llm.llmapi import MultimodalEncoder, tracing
+from tensorrt_llm.llmapi import MultimodalEncoder, SchedulingParams, tracing
 from tensorrt_llm.llmapi.disagg_utils import (DisaggClusterConfig,
                                               MetadataServerConfig, ServerRole)
 from tensorrt_llm.llmapi.llm import RequestOutput
@@ -1150,6 +1150,9 @@ class OpenAIServer:
             trace_headers = (None if raw_request is None else
                              tracing.extract_trace_headers(raw_request.headers))
 
+            scheduling_params = SchedulingParams(
+                agent_hierarchy=request.agent_hierarchy)
+
             generate_inputs = prompt
             preprocess_fn = getattr(self.generator, "preprocess", None)
             if preprocess_fn is not None:
@@ -1167,6 +1170,7 @@ class OpenAIServer:
                 disaggregated_params=disaggregated_params,
                 cache_salt=request.cache_salt,
                 trace_headers=trace_headers,
+                scheduling_params=scheduling_params,
             )
             asyncio.create_task(self.await_disconnected(raw_request, promise))
             if not self.postproc_worker_enabled:
@@ -1556,6 +1560,9 @@ class OpenAIServer:
                 postproc_args=postproc_args,
             )
 
+            scheduling_params = SchedulingParams(
+                agent_hierarchy=request.agent_hierarchy)
+
             # Generate
             promise = self.generator.generate_async(
                 inputs=harmony_tokens,
@@ -1564,6 +1571,7 @@ class OpenAIServer:
                 if self.postproc_worker_enabled else None,
                 streaming=bool(request.stream),
                 lora_request=request.lora_request,
+                scheduling_params=scheduling_params,
                 disaggregated_params=disaggregated_params,
                 trace_headers=trace_headers,
             )
