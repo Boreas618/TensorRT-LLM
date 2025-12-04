@@ -103,6 +103,11 @@ public:
             void, tbk::BaseKVCacheManager, addSequence, requestId, inputLength, beamWidth, llmRequest);
     }
 
+    void truncateBlocks(tb::LlmRequest::VecTokens const& targetTokens, SizeType32 numTokensToKeep) override
+    {
+        PYBIND11_OVERLOAD_PURE(void, tbk::BaseKVCacheManager, truncateBlocks, targetTokens, numTokensToKeep);
+    }
+
     std::optional<tbk::KVCacheBlock::IdType> removeSequence(tb::LlmRequest::RequestIdType requestId,
         tensorrt_llm::common::OptionalRef<tb::LlmRequest const> llmRequest = std::nullopt,
         bool pinOnRelease = false) override
@@ -364,6 +369,7 @@ void tb::kv_cache_manager::KVCacheManagerBindings::initBindings(py::module_& m)
         .def("add_sequence", &BaseKVCacheManager::addSequence, py::call_guard<py::gil_scoped_release>())
         .def("remove_sequence", &BaseKVCacheManager::removeSequence, py::call_guard<py::gil_scoped_release>())
         .def("pin_blocks", &BaseKVCacheManager::pinBlocks, py::call_guard<py::gil_scoped_release>())
+        .def("truncate_blocks", &BaseKVCacheManager::truncateBlocks, py::call_guard<py::gil_scoped_release>())
         .def("scheduling_remove_sequence", &BaseKVCacheManager::schedulingRemoveSequence,
             py::call_guard<py::gil_scoped_release>())
         .def(
