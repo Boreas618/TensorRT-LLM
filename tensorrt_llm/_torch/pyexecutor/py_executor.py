@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 import functools
 import os
+import queue
 import threading
 import time
 import traceback
@@ -31,6 +32,8 @@ from tensorrt_llm.bindings.executor import (DisServingRequestStats,
                                             StaticBatchingStats)
 from tensorrt_llm.bindings.internal.batch_manager import (LlmRequestType,
                                                           ReqIdsSet)
+from tensorrt_llm.executor.request import (KVCacheHintRequest,
+                                           TruncateKVCacheRequest)
 from tensorrt_llm.inputs.multimodal import strip_mm_data_for_generation
 from tensorrt_llm.llmapi.llm_args import PeftCacheConfig, WaitingQueuePolicy
 from tensorrt_llm.logger import logger
@@ -529,6 +532,9 @@ class PyExecutor:
         self.control_request_barrier = threading.Event()
         self.control_action_done = threading.Event()
 
+        # Control queue for the executor loop
+        self.control_queue: queue.Queue[KVCacheHintRequest] = queue.Queue()
+
         self.stats_lock = threading.Lock()
         self.stats = []
         self._latest_kv_iter_stats = None
@@ -874,6 +880,9 @@ class PyExecutor:
             with self.response_cv:
                 self.result_wait_queues[req_id] = result_wait_queue
         return req_id
+
+    def enqueue_kv_cache_hint_request(self, request: KVCacheHintRequest):
+        self.control_queue.put(request)
 
     def set_gather_responses(self, gather_all_responses):
         self.gather_all_responses = gather_all_responses
@@ -2051,6 +2060,17 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
 
+                while self.control_queue.qsize() > 0:
+                    request = self.control_queue.get_nowait()
+                    if request is not None:
+                        if isinstance(request, TruncateKVCacheRequest):
+                            self.kv_cache_manager.truncate_blocks(
+                                request.messages,
+                                len(request.messages_to_retain))
+                        else:
+                            raise ValueError(
+                                f"Invalid request type: {type(request)}.")
+
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
 
@@ -2293,6 +2313,17 @@ class PyExecutor:
                 profile_step()
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
+
+                while self.control_queue.qsize() > 0:
+                    request = self.control_queue.get_nowait()
+                    if request is not None:
+                        if isinstance(request, TruncateKVCacheRequest):
+                            self.kv_cache_manager.truncate_blocks(
+                                request.messages,
+                                len(request.messages_to_retain))
+                        else:
+                            raise ValueError(
+                                f"Invalid request type: {type(request)}.")
 
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
