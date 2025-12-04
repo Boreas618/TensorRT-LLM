@@ -3,7 +3,7 @@ import concurrent.futures
 import threading
 import time
 import weakref
-from typing import Dict, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import torch
 import zmq
@@ -20,7 +20,8 @@ from ..llmapi.utils import (AsyncQueue, ManagedThread, _SyncQueue,
 from .executor import GenerationExecutor
 from .ipc import FusedIpcQueue, IpcQueue
 from .postproc_worker import PostprocWorker, PostprocWorkerConfig
-from .request import CancellingRequest, GenerationRequest
+from .request import (CancellingRequest, GenerationRequest,
+                      TruncateKVCacheRequest)
 from .result import GenerationResult, IterationResult
 from .utils import (ErrorResponse, IntraProcessQueue, WorkerCommIpcAddrs,
                     create_mpi_comm_session, get_spawn_proxy_process_env,
@@ -440,6 +441,23 @@ class GenerationExecutorProxy(GenerationExecutor):
         self._handle_background_error()
 
         return result
+
+    def set_kv_cache_hints(
+        self,
+        action: Literal["truncate"],
+        messages_to_retain: List[int],
+        messages: List[int],
+    ) -> None:
+        if action == "truncate":
+            request = TruncateKVCacheRequest(
+                messages_to_retain=messages_to_retain,
+                messages=messages,
+            )
+        else:
+            raise ValueError(f"Invalid action: {action}")
+
+        with nvtx_range_debug("request_queue.put"):
+            self.request_queue.put(request)
 
     def __del__(self):
         self.shutdown()
