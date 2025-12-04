@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import os
+import types
 from abc import ABC
 from enum import Enum
 from typing import Callable, List, Optional
@@ -115,6 +116,8 @@ class OpenaiWorker(Worker):
         add_param_if_not_none(params, "temperature", [task.temperature])
         add_param_if_not_none(params, "top_p", [task.top_p])
         add_param_if_not_none(params, "user", [task.user])
+        add_param_if_not_none(params, "reasoning_effort",
+                              [task.reasoning_effort])
 
         # Override parameters for deterministic inference
         if is_deterministic_mode():

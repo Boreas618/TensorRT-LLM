@@ -1,7 +1,7 @@
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import numpy as np
 import torch
