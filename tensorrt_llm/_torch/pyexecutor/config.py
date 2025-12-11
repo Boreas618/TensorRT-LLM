@@ -116,8 +116,8 @@ class PyTorchConfig:
     # If false, set the PyTorch CUDA memory fraction to 1.0.
     _limit_torch_cuda_mem_fraction: bool = True
 
-    agent_percentage: float = 0.0
-    agent_types: Optional[List[str]] = None
+    # Configuration for agent tree scheduling
+    agent_tree_config: Optional["AgentTreeConfig"] = None
 
 
 def _construct_checkpoint_loader(

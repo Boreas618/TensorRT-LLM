@@ -49,14 +49,12 @@ using namespace tensorrt_llm::batch_manager;
 void tensorrt_llm::pybind::batch_manager::algorithms::initBindings(pybind11::module_& m)
 {
     py::class_<CapacityScheduler>(m, CapacityScheduler::name)
-        .def(py::init<SizeType32, executor::CapacitySchedulerPolicy, bool, bool, LlmRequestState, LlmRequestState,
-                 float, std::optional<std::vector<std::string>>>(),
+        .def(py::init<SizeType32, executor::CapacitySchedulerPolicy, bool, bool, LlmRequestState, LlmRequestState>(),
             py::arg("max_num_requests"), py::arg("capacity_scheduler_policy"), py::arg("has_kv_cache_manager"),
             py::arg("two_step_lookahead") = false,
             py::arg_v("no_schedule_until_state", LlmRequestState::kCONTEXT_INIT, "LlmRequestState.CONTEXT_INIT"),
             py::arg_v("no_schedule_after_state", LlmRequestState::kGENERATION_COMPLETE,
-                "LlmRequestState.GENERATION_COMPLETE"),
-            py::arg("agent_percentage") = 0.0, py::arg("agent_types") = std::nullopt)
+                "LlmRequestState.GENERATION_COMPLETE"))
         .def("__call__", &CapacityScheduler::operator(), py::arg("active_requests"),
             py::arg("kv_cache_manager") = nullptr, py::arg("peft_cache_manager") = nullptr,
             py::arg("cross_kv_cache_manager") = nullptr)
@@ -64,11 +62,12 @@ void tensorrt_llm::pybind::batch_manager::algorithms::initBindings(pybind11::mod
 
     py::class_<MicroBatchScheduler>(m, MicroBatchScheduler::name)
         .def(py::init<std::optional<batch_scheduler::ContextChunkingConfig>, std::optional<SizeType32>, LlmRequestState,
-                 LlmRequestState>(),
+                 LlmRequestState, std::optional<batch_scheduler::AgentTreeConfig>>(),
             py::arg("ctx_chunk_config") = std::nullopt, py::arg("max_context_length") = std::nullopt,
             py::arg_v("no_schedule_until_state", LlmRequestState::kCONTEXT_INIT, "LlmRequestState.CONTEXT_INIT"),
             py::arg_v("no_schedule_after_state", LlmRequestState::kGENERATION_COMPLETE,
-                "LlmRequestState.GENERATION_COMPLETE"))
+                "LlmRequestState.GENERATION_COMPLETE"),
+            py::arg("agent_tree_config") = std::nullopt)
         .def("__call__", &MicroBatchScheduler::operator(), py::arg("active_requests"), py::arg("inflight_req_ids"),
             py::arg("max_batch_size_runtime"), py::arg("max_num_tokens_runtime"))
         .def("name", [](MicroBatchScheduler const&) { return MicroBatchScheduler::name; });
