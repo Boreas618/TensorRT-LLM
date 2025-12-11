@@ -1,13 +1,18 @@
 import argparse
 import asyncio
+import json
+import os
 import sys
 import threading
+from pathlib import Path
+from typing import List
 
 from openai import AsyncOpenAI
 
 from tensorrt_llm.scaffolding import (
     MCPWorker,
-    NativeGenerationController,
+    NativeChatController,
+    QueryCollector,
     ScaffoldingLlm,
     TRTOpenaiWorker,
 )
@@ -44,21 +49,24 @@ def parse_arguments():
     parser.add_argument("--base_url", type=str, default="http://localhost:8000/v1")
     parser.add_argument("--model", type=str, default="gpt-oss-20b")
 
-    # Benchmark mode selection
+    # Benchmark enable flags
     parser.add_argument(
-        "--mode",
-        type=str,
-        default="agent_chat",
-        choices=["agent_only", "chat_only", "agent_chat"],
-        help="Benchmark mode: 'agent_only', 'chat_only', or 'agent_chat' (default: agent_chat)",
+        "--enable_normal_agent",
+        action="store_true",
+        help="Enable normal agent benchmark",
+    )
+    parser.add_argument(
+        "--enable_chatbot",
+        action="store_true",
+        help="Enable chatbot benchmark",
     )
 
     # Benchmark parameters
     parser.add_argument(
         "--agent_prompt_num",
         type=int,
-        default=128,
-        help="Number of prompts to send for agent benchmark (default: 128)",
+        default=100,
+        help="Number of prompts to send for agent benchmark (default: 10)",
     )
     parser.add_argument(
         "--chat_prompt_num",
@@ -84,8 +92,14 @@ def parse_arguments():
     parser.add_argument(
         "--max_tokens",
         type=int,
-        default=16 * 1024,
-        help="Maximum number of tokens to generate (default: 8192)",
+        default=8 * 1024,
+        help="Maximum number of tokens to generate (default: 16384)",
+    )
+    parser.add_argument(
+        "--max_tokens_chat",
+        type=int,
+        default=1024,
+        help="Maximum number of tokens to generate for chat (default: 1024)",
     )
     parser.add_argument(
         "--max_parallel_requests",
@@ -129,7 +143,7 @@ async def async_agent_benchmark(args):
     ]
     strategy = PoissonRateStrategy(rate=args.agent_rate)
 
-    for i in range(args.times):
+    for i in range(times):
         (
             results,
             requests_start_time,
@@ -146,36 +160,68 @@ async def async_agent_benchmark(args):
     llm.shutdown()
     generation_worker.shutdown()
 
-    # Wait for LLM's internal event loop to fully stop
     if not llm.own_loop:
         await llm.main_loop_stop_event.wait()
 
-    return
+
+async def async_agent_benchmark(args):
+    """Normal agent benchmark."""
+    llm, mcp_worker, generation_worker = await create_agent_resources(args)
+    prompts = load_prompts_from_json(args.agent_prompt_num)
+    try:
+        await run_agent_benchmark_core(
+            llm, prompts, args.normal_agent_concurrency, "Agent-Normal", args, times=args.times
+        )
+    finally:
+        await cleanup_agent_resources(llm, mcp_worker, generation_worker)
+
+
+async def async_burst_agent_benchmark(args):
+    """Burst agent benchmark that simulates sudden traffic spike."""
+    with print_lock:
+        print(f"\n[Burst] Waiting {args.burst_delay}s before starting burst traffic...")
+        sys.stdout.flush()
+
+    await asyncio.sleep(args.burst_delay)
+
+    llm, mcp_worker, generation_worker = await create_agent_resources(args)
+
+    with print_lock:
+        print(
+            f"\n[Burst] Starting burst traffic with "
+            f"{args.burst_prompt_num} prompts, "
+            f"concurrency={args.burst_agent_concurrency}"
+        )
+        sys.stdout.flush()
+
+    try:
+        prompts = load_prompts_from_json(args.burst_prompt_num)
+        await run_agent_benchmark_core(
+            llm, prompts, args.burst_agent_concurrency, "Agent-Burst", args, times=1
+        )
+    finally:
+        await cleanup_agent_resources(llm, mcp_worker, generation_worker)
 
 
 async def async_chat_benchmark(args):
     """Chat benchmark using simple generation without agent capabilities."""
     client = AsyncOpenAI(api_key=args.openai_api_key, base_url=args.base_url)
-    generation_worker = TRTOpenaiWorker(client, args.model)
+    chat_worker = TRTOpenaiWorker(client, args.model)
 
-    chat_controller = NativeGenerationController(
+    chat_controller = NativeChatController(
         sampling_params={
             "temperature": 0.9,
-            "max_tokens": args.max_tokens,
+            "max_tokens": args.max_tokens_chat,
         }
     )
 
     chat_llm = ScaffoldingLlm(
         chat_controller,
-        {NativeGenerationController.WorkerTag.GENERATION: generation_worker},
+        {NativeChatController.WorkerTag.GENERATION: chat_worker},
         max_parallel_requests=args.max_parallel_requests,
     )
 
-    chat_prompt = (
-        "Natalia sold clips to 48 of her friends in April, "
-        "and then she sold half as many clips in May. "
-        "How many clips did Natalia sell altogether in April and May?"
-    )
+    prompts = load_prompts_from_json(args.chat_prompt_num)
 
     task_collection_types = {}
     requests = [
@@ -196,7 +242,7 @@ async def async_chat_benchmark(args):
 
     # Graceful shutdown
     chat_llm.shutdown()
-    generation_worker.shutdown()
+    chat_worker.shutdown()
 
     # Wait for LLM's internal event loop to fully stop
     if not chat_llm.own_loop:
@@ -238,16 +284,31 @@ def run_benchmark_in_thread(async_func, args, name):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    # Select benchmarks based on mode
+    # Select benchmarks based on enable flags
     benchmarks = []
-    if args.mode in ["agent_only", "agent_chat"]:
+    if args.enable_normal_agent:
         benchmarks.append((async_agent_benchmark, "Agent-Benchmark"))
-    if args.mode in ["chat_only", "agent_chat"]:
+    if args.enable_burst_agent:
+        benchmarks.append((async_burst_agent_benchmark, "Burst-Agent-Benchmark"))
+    if args.enable_chatbot:
         benchmarks.append((async_chat_benchmark, "Chat-Benchmark"))
+
+    if not benchmarks:
+        print(
+            "No benchmark enabled. Use --enable_normal_agent, --enable_burst_agent, or --enable_chatbot"
+        )
+        sys.exit(1)
 
     # Create and start all benchmark threads
     threads = []
-    print(f"Starting benchmarks in mode: {args.mode}")
+    enabled_flags = []
+    if args.enable_normal_agent:
+        enabled_flags.append("normal_agent")
+    if args.enable_burst_agent:
+        enabled_flags.append("burst_agent")
+    if args.enable_chatbot:
+        enabled_flags.append("chatbot")
+    print(f"Starting benchmarks: {', '.join(enabled_flags)}")
     print("=" * 60)
     for async_func, name in benchmarks:
         thread = run_benchmark_in_thread(async_func, args, name)

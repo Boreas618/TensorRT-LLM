@@ -15,7 +15,6 @@ from tensorrt_llm.scaffolding.contrib.open_deep_research import (
     create_open_deep_research_scaffolding_llm,
 )
 
-
 def parse_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument("--openai_api_key", type=str, default="tensorrt_llm")
@@ -70,7 +69,7 @@ async def main():
 
     llm.shutdown()
     generation_worker.shutdown()
-    mcp_worker.shutdown()
+    await mcp_worker.shutdown()
     return
 
 

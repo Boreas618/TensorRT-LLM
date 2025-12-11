@@ -3977,8 +3977,7 @@ class TorchLlmArgs(BaseLlmArgs):
             batch_wait_timeout_iters=self.batch_wait_timeout_iters,
             batch_wait_max_tokens_ratio=self.batch_wait_max_tokens_ratio,
             enable_sleep=self.enable_sleep,
-            agent_percentage=self.agent_percentage,
-            agent_types=self.agent_types,
+            agent_tree_config=self.agent_tree_config,
         )
 
 

@@ -177,6 +177,8 @@ class OpenaiWorker(Worker):
             if task.enable_token_counting:
                 task.prompt_tokens_num = response.usage.prompt_tokens
                 task.completion_tokens_num = response.usage.completion_tokens
+                if hasattr(response.usage, "completion_tokens_details"):
+                    task.reasoning_tokens_num = response.usage.completion_tokens_details.reasoning_tokens
 
             return TaskStatus.SUCCESS
 
