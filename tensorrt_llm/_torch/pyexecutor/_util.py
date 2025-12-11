@@ -781,16 +781,17 @@ def create_py_executor_instance(
     if scheduler_capacity == 1 and mapping.enable_attention_dp and kv_cache_manager:
         scheduler_capacity += 1
 
+    agent_tree_config = pytorch_backend_config.agent_tree_config
+
     capacity_scheduler = BindCapacityScheduler(
         scheduler_capacity,
         kv_cache_manager.impl if kv_cache_manager is not None else None,
         peft_cache_manager.impl if peft_cache_manager is not None else None,
         scheduler_config.capacity_scheduler_policy,
-        two_step_lookahead=mapping.has_pp(),
-        agent_percentage=pytorch_backend_config.agent_percentage,
-        agent_types=pytorch_backend_config.agent_types)
+        two_step_lookahead=mapping.has_pp())
+
     mb_scheduler = BindMicroBatchScheduler(max_batch_size, max_num_tokens,
-                                           ctx_chunk_config)
+                                           ctx_chunk_config, agent_tree_config)
     scheduler = SimpleScheduler(capacity_scheduler, mb_scheduler)
 
     config = model_engine.model.model_config.pretrained_config

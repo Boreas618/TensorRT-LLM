@@ -17,6 +17,8 @@
 
 #include "bindings.h"
 
+#include <limits>
+
 #include "tensorrt_llm/batch_manager/common.h"
 #include "tensorrt_llm/batch_manager/decoderBuffers.h"
 #include "tensorrt_llm/batch_manager/kvCacheConnector.h"
@@ -95,6 +97,14 @@ void initBindings(pybind11::module_& m)
             py::arg("chunk_unit_size"))
         .def_readwrite("chunking_policy", &tb::batch_scheduler::ContextChunkingConfig::chunkingPolicy)
         .def_readwrite("chunk_unit_size", &tb::batch_scheduler::ContextChunkingConfig::chunkUnitSize);
+
+    py::class_<tb::batch_scheduler::AgentTreeConfig>(m, "AgentTreeConfig")
+        .def(py::init<float, std::optional<std::vector<std::string>>, SizeType32>(), py::arg("agent_percentage"),
+            py::arg("agent_types") = std::nullopt,
+            py::arg("agent_inflight_seq_num") = std::numeric_limits<SizeType32>::max())
+        .def_readwrite("agent_percentage", &tb::batch_scheduler::AgentTreeConfig::agentPercentage)
+        .def_readwrite("agent_types", &tb::batch_scheduler::AgentTreeConfig::agentTypes)
+        .def_readwrite("agent_inflight_seq_num", &tb::batch_scheduler::AgentTreeConfig::agentInflightSeqNum);
 
     py::classh<GenLlmReq>(m, "GenericLlmRequest")
         .def("set_exclude_input_from_output", &GenLlmReq::setExcludeInputFromOutput, py::arg("exclude"))
