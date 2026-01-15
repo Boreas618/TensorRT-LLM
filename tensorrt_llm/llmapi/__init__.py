@@ -6,8 +6,8 @@ from ..scheduling_params import SchedulingParams
 from .build_cache import BuildCacheConfig
 from .llm import LLM, RequestOutput
 # yapf: disable
-from .llm_args import (AgentTreeConfig, AttentionDpConfig, AutoDecodingConfig,
-                       BatchingType, CacheTransceiverConfig, CalibConfig,
+from .llm_args import (AttentionDpConfig, AutoDecodingConfig, BatchingType,
+                       CacheTransceiverConfig, CalibConfig,
                        CapacitySchedulerPolicy, ContextChunkingPolicy,
                        CudaGraphConfig, DeepSeekSparseAttentionConfig,
                        DraftTargetDecodingConfig, DynamicBatchConfig,
@@ -16,11 +16,11 @@ from .llm_args import (AgentTreeConfig, AttentionDpConfig, AutoDecodingConfig,
                        LookaheadDecodingConfig, MedusaDecodingConfig, MoeConfig,
                        MTPDecodingConfig, NGramDecodingConfig,
                        PARDDecodingConfig, PrometheusMetricsConfig,
-                       RocketSparseAttentionConfig, SADecodingConfig,
-                       SAEnhancerConfig, SaveHiddenStatesDecodingConfig,
-                       SchedulerConfig, SkipSoftmaxAttentionConfig,
-                       TorchCompileConfig, TorchLlmArgs, TrtLlmArgs,
-                       UserProvidedDecodingConfig)
+                       ResortRequestPolicyConfig, RocketSparseAttentionConfig,
+                       SADecodingConfig, SAEnhancerConfig,
+                       SaveHiddenStatesDecodingConfig, SchedulerConfig,
+                       SkipSoftmaxAttentionConfig, TorchCompileConfig,
+                       TorchLlmArgs, TrtLlmArgs, UserProvidedDecodingConfig)
 from .llm_utils import (BuildConfig, KvCacheRetentionConfig, QuantAlgo,
                         QuantConfig)
 from .mm_encoder import MultimodalEncoder
@@ -35,7 +35,6 @@ __all__ = [
     'GuidedDecodingParams',
     'SamplingParams',
     'DisaggregatedParams',
-    'AgentTreeConfig',
     'DisaggScheduleStyle',
     'KvCacheConfig',
     'KvCacheRetentionConfig',
@@ -75,6 +74,7 @@ __all__ = [
     'LoRARequest',
     'SaveHiddenStatesDecodingConfig',
     'RocketSparseAttentionConfig',
+    'ResortRequestPolicyConfig',
     'DeepSeekSparseAttentionConfig',
     'SchedulingParams',
     'SkipSoftmaxAttentionConfig',
