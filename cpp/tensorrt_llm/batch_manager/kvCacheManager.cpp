@@ -3712,8 +3712,6 @@ void KVCacheManager::addSequence(
         llmRequest->updateAllocNewBlocksPerRequest(mBlockManager.getNumAllocNewBlocks() - numAllocNewBlocksPreRequest);
         llmRequest->updateReusedBlocksPerRequest(mBlockManager.getNumReusedBlocks() - numReusedBlocksPreRequest);
         llmRequest->updateMissedBlocksPerRequest(mBlockManager.getNumMissedBlocks() - numMissedBlocksPreRequest);
-        // Update system-level KV cache statistics for this request.
-        llmRequest->setKvCacheSystemStats(getMaxNumBlocks(), getUsedNumBlocks(), getNumFreeBlocks());
     }
 }
 
