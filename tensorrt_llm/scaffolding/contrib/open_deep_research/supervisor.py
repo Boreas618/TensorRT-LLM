@@ -1,6 +1,5 @@
 import copy
 import json
-from dataclasses import dataclass, field
 from typing import List
 
 from tensorrt_llm.scaffolding.controller import (
@@ -11,11 +10,11 @@ from tensorrt_llm.scaffolding.controller import (
 )
 from tensorrt_llm.scaffolding.scaffolding_llm import ScaffoldingLlm
 from tensorrt_llm.scaffolding.task import (
-    AssistantMessage,
     ChatTask,
     MCPCallTask,
     SystemMessage,
     Task,
+    ToolMessage,
     UserMessage,
 )
 from tensorrt_llm.scaffolding.task_collection import (
@@ -29,32 +28,14 @@ from tensorrt_llm.scaffolding.task_collection import (
 from tensorrt_llm.scaffolding.worker import Worker
 
 from .prompts import (
-    compress_system_prompt,
-    compress_system_prompt_prefix,
-    final_report_generation_prompt,
-    generate_research_brief_prompt,
-    generate_research_brief_prompt_prefix,
-    supervisor_system_prompt,
-    supervisor_system_prompt_prefix,
+    COMPRESSOR_SYSTEM_PROMPT,
+    FINAL_REPORT_GENERATION_PROMPT,
+    GENERATE_RESEARCH_BRIEF_PROMPT,
+    SUPERVISOR_SYSTEM_PROMPT,
 )
 from .researcher import Compressor, Researcher, ResearchTask
 from .tools import complete_research_tool, conduct_research_tool, think_tool
 from .utils import get_today_str
-
-
-@dataclass
-class SupervisorTask(Task):
-    user_prompt: str = field(default=None)
-    research_brief: str = field(default=None)
-    final_report: str = field(default=None)
-
-    @staticmethod
-    def create_from_prompt(prompt: str) -> "SupervisorTask":
-        task = SupervisorTask()
-        task.user_prompt = prompt
-        task.research_brief = None
-        task.final_report = None
-        return task
 
 
 @sub_request_node("agent_deep_research", is_top_level=True)
@@ -92,10 +73,9 @@ class Supervisor(Controller):
 
         research_brief_messages = [
             UserMessage(
-                content=generate_research_brief_prompt.format(
+                content=GENERATE_RESEARCH_BRIEF_PROMPT.format(
                     date=get_today_str(), messages=str(user_topic)
                 ),
-                prefix=generate_research_brief_prompt_prefix,
             )
         ]
 
@@ -109,19 +89,17 @@ class Supervisor(Controller):
             research_brief,
             [
                 SystemMessage(
-                    content=supervisor_system_prompt.format(
+                    content=SUPERVISOR_SYSTEM_PROMPT.format(
                         date=get_today_str(),
                         max_researcher_iterations=self.max_research_iter,
                         max_concurrent_research_units=self.max_concurrent_research_units,
                     ),
-                    prefix=supervisor_system_prompt_prefix,
                 )
             ],
             tools=self.tools,
         )
 
-        findings = []
-
+        research_findings = {}
         for _ in range(self.max_research_iter):
             yield from self.research_planning_controller.process([research_planning_task])
 
@@ -134,22 +112,22 @@ class Supervisor(Controller):
                 tool_name = tool_call.function.name
                 arguments = json.loads(tool_call.function.arguments)
 
-                research_planning_task.add_message(
-                    AssistantMessage(
-                        f"I have called the tool {tool_name} with arguments: {tool_call.function.arguments}"
-                    )
-                )
-
                 if tool_name == "think_tool":
                     research_planning_task.add_message(
-                        UserMessage(f"Reflection recorded: {arguments['think']}")
+                        ToolMessage(
+                            f"Reflection recorded: {arguments['think']}", tool_call_id=tool_call.id
+                        )
                     )
                 elif tool_name == "conduct_research":
-                    research_tasks_list.append(
-                        [ResearchTask.from_topic(arguments["research_topic"])]
+                    research_task = ResearchTask.from_topic(
+                        arguments["research_topic"], tool_call.id
                     )
+                    research_tasks_list.append([research_task])
 
                 elif tool_name == "complete_research":
+                    research_planning_task.add_message(
+                        ToolMessage("Research completed.", tool_call_id=tool_call.id)
+                    )
                     break
 
             if len(research_tasks_list) > 0:
@@ -163,26 +141,21 @@ class Supervisor(Controller):
 
                 for research_tasks in research_tasks_list:
                     research_planning_task.add_message(
-                        UserMessage(research_tasks[0].research_result)
+                        ToolMessage(
+                            research_tasks[0].research_findings, research_tasks[0].tool_call_id
+                        )
                     )
-                    findings.append(research_tasks[0].research_result)
+                    topic = research_tasks[0].research_topic
+                    findings = research_tasks[0].research_findings
+                    research_findings[topic] = findings
 
-        final_report_generation_task = ChatTask.create_from_messages(
-            [
-                SystemMessage(
-                    final_report_generation_prompt.format(
-                        research_brief=research_brief,
-                        messages=research_planning_task.messages_to_dict_content(),
-                        findings=findings,
-                        date=get_today_str(),
-                    ),
-                ),
-            ],
+        # Generate final report based on interactions with the user and the research findings
+        # gathered by the researchers.
+        research_planning_task.add_message(
+            UserMessage(FINAL_REPORT_GENERATION_PROMPT.format(date=get_today_str()))
         )
-
-        yield from self.final_report_controller.process([final_report_generation_task])
-
-        final_report = final_report_generation_task.messages[-1].content
+        yield from self.final_report_controller.process([research_planning_task])
+        final_report = research_planning_task.messages[-1].content
 
         tasks[0].output_str = final_report
         return
@@ -246,6 +219,7 @@ def create_open_deep_research_scaffolding_llm(
                 controller_name=controller_name,
                 task_types=[ChatTask, MCPCallTask],
                 enable_print=True,
+                capture_messages=True,
             )(controller_type)
 
         supervisor_type = wrap_with_detailed_profiler(supervisor_type, "Supervisor")
@@ -265,14 +239,13 @@ def create_open_deep_research_scaffolding_llm(
         )(chat_with_mcp_type)
 
     research_chat_with_tools_controller = chat_with_mcp_type(
-        gerneration_controller, max_iterations=1
+        gerneration_controller, max_iterations=5
     )
     research_compress_controller = compressor_type(
         gerneration_controller,
         system_prompts=[
             SystemMessage(
-                compress_system_prompt.format(date=get_today_str()),
-                prefix=compress_system_prompt_prefix,
+                COMPRESSOR_SYSTEM_PROMPT.format(date=get_today_str()),
             )
         ],
     )
