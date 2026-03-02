@@ -452,7 +452,7 @@ AgentTreePolicy::AgentTreePolicy(std::optional<batch_scheduler::AgentTreeConfig>
 {
 }
 
-RequestVector AgentTreePolicy::resortRequests(RequestVector const& requests) const
+RequestVector AgentTreePolicy::reorderRequests(RequestVector const& requests) const
 {
     // If no agent tree root, return requests as-is
     if (!mAgentTreeRoot)
