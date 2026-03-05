@@ -584,7 +584,10 @@ class OpenAIServer:
         self.app.add_api_route("/kv_cache_events",
                                self.get_kv_cache_events,
                                methods=["POST"])
-        self.app.add_api_route("/v1/kv_cache_hints", self.set_kv_cache_hints if not self.use_harmony else self.set_kv_cache_hints_harmony, methods=["POST"])
+        self.app.add_api_route("/v1/kv_cache_hints",
+                               self.set_kv_cache_hints if not self.use_harmony
+                               else self.set_kv_cache_hints_harmony,
+                               methods=["POST"])
         self.app.add_api_route("/v1/completions",
                                self.openai_completion,
                                methods=["POST"])
@@ -896,28 +899,30 @@ class OpenAIServer:
             return self.create_error_response(
                 message=f"Invalid action: {request.action}",
                 err_type="InvalidRequestError",
-                status_code=HTTPStatus.BAD_REQUEST
-            )
+                status_code=HTTPStatus.BAD_REQUEST)
 
         sampling_params = request.to_sampling_params(
             vocab_size=self.tokenizer.tokenizer.vocab_size,
-            gather_generation_logits=self.generator.args.gather_generation_logits,
-            backend=self.generator.args.backend
-        )
+            gather_generation_logits=self.generator.args.
+            gather_generation_logits,
+            backend=self.generator.args.backend)
 
         tool_dicts = None if request.tools is None else [
             tool.model_dump() for tool in request.tools
         ]
         add_generation_prompt = request.add_generation_prompt
-        documents =request.documents
+        documents = request.documents
         chat_template = request.chat_template
         chat_template_kwargs = request.chat_template_kwargs or {}
 
         from openai.types.chat import ChatCompletionMessageParam
-        def convert_messages(messages: List[ChatCompletionMessageParam]) -> List[int]:
+
+        def convert_messages(
+                messages: List[ChatCompletionMessageParam]) -> List[int]:
             try:
                 conversation: List[ConversationMessage] = []
-                conversation, _, __ = parse_chat_messages_coroutines(messages, self.model_config, None)
+                conversation, _, __ = parse_chat_messages_coroutines(
+                    messages, self.model_config, None)
                 prompt: str = apply_chat_template(
                     model_type=self.model_config.model_type,
                     tokenizer=self.tokenizer,
@@ -935,8 +940,10 @@ class OpenAIServer:
                 logger.error(traceback.format_exc())
                 return self.create_error_response(str(e))
 
-        messages_to_retain = convert_messages(request.messages_to_retain) if request.messages_to_retain else []
-        messages = convert_messages(request.messages) if request.messages else []
+        messages_to_retain = convert_messages(
+            request.messages_to_retain) if request.messages_to_retain else []
+        messages = convert_messages(
+            request.messages) if request.messages else []
 
         self.generator.set_kv_cache_hints(
             action="truncate",
@@ -947,13 +954,13 @@ class OpenAIServer:
 
         return Response(status_code=200)
 
-    def set_kv_cache_hints_harmony(self, request: KVCacheHintRequest) -> Response:
+    def set_kv_cache_hints_harmony(self,
+                                   request: KVCacheHintRequest) -> Response:
         if request.action != "truncate":
             return self.create_error_response(
                 message=f"Invalid action: {request.action}",
                 err_type="InvalidRequestError",
-                status_code=HTTPStatus.BAD_REQUEST
-            )
+                status_code=HTTPStatus.BAD_REQUEST)
 
         if not self.harmony_adapter:
             self.harmony_adapter = get_harmony_adapter()
@@ -961,18 +968,20 @@ class OpenAIServer:
         tools_dict = None
         if request.tools:
             tools_dict = [tool.model_dump() for tool in request.tools]
-        reasoning_effort = maybe_transform_reasoning_effort(request.reasoning_effort)
+        reasoning_effort = maybe_transform_reasoning_effort(
+            request.reasoning_effort)
         tool_choice = getattr(request, 'tool_choice', None)
 
         from openai.types.chat import ChatCompletionMessageParam
-        def convert_messages(messages: List[ChatCompletionMessageParam]) -> List[int]:
+
+        def convert_messages(
+                messages: List[ChatCompletionMessageParam]) -> List[int]:
             try:
                 harmony_tokens = self.harmony_adapter.openai_to_harmony_tokens(
                     messages,
                     tools_dict,
                     reasoning_effort=reasoning_effort,
-                    tool_choice=tool_choice
-                )
+                    tool_choice=tool_choice)
                 return harmony_tokens
             except Exception as e:
                 raise e
@@ -997,7 +1006,6 @@ class OpenAIServer:
             sampling_params=sampling_params,
         )
         return Response(status_code=200)
-
 
     async def _extract_metrics(self, res: RequestOutput, raw_request: Request):
         if not res.finished:
