@@ -152,6 +152,8 @@ class OpenaiWorker(Worker):
         add_param_if_not_none(params, "temperature", [task.temperature])
         add_param_if_not_none(params, "top_p", [task.top_p])
         add_param_if_not_none(params, "user", [task.user])
+        if task.ignore_eos:
+            params["extra_body"]["ignore_eos"] = True
 
         # Override parameters for deterministic inference
         if is_deterministic_mode():
@@ -313,7 +315,8 @@ class TRTLLMWorker(Worker):
             top_p=task.top_p,
             top_k=task.top_k,
             return_context_logits=task.return_context_logits,
-            logprobs=task.num_logprobs)
+            logprobs=task.num_logprobs,
+            ignore_eos=task.ignore_eos)
         return sampling_params
 
     async def streaming_generate_helper(self, generate_result, step_at_least,
