@@ -14,6 +14,7 @@ from unittest.mock import Mock
 import pytest
 
 from tensorrt_llm._torch.pyexecutor.executor_request_queue import (
+    CONTROL_REQUEST_ID,
     SHUTDOWN_REQUEST_ID,
     RequestQueueItem,
 )
@@ -30,6 +31,7 @@ class MockPyExecutor:
 
     def __init__(self, dist):
         self.dist = dist
+        self.active_requests = []
         self.canceled_req_ids = []
         self.control_requests = []
         self.request_accumulated = []
@@ -37,6 +39,9 @@ class MockPyExecutor:
         self.expected_num_active_requests = 0
         self.new_active_requests_queue_latency_ms = 0.0
         self.waiting_queue = FCFSWaitingQueue()
+        self.executor_request_queue = Mock()
+        self.control_request_barrier = Mock()
+        self.control_action_done = Mock()
 
     def _handle_special_queue_items(self, new_requests):
         """Handle special signals.
@@ -59,6 +64,19 @@ class MockPyExecutor:
                 accepted_new_requests.append(req_item)
 
         return accepted_new_requests
+
+    def _handle_control_request(self):
+        """Mirror PyExecutor._handle_control_request."""
+        if (
+            len(self.active_requests) == 0
+            and len(self.waiting_queue) == 0
+            and len(self.control_requests) > 0
+        ):
+            assert len(self.control_requests) == 1
+            self.control_requests.pop(0)
+            self.control_request_barrier.set()
+            self.control_action_done.wait()
+            self.control_action_done.clear()
 
     def update_waiting_queue(self):
         """Update waiting queue to remove canceled requests.
