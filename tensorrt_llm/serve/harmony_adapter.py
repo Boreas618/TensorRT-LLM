@@ -24,9 +24,8 @@ from .openai_protocol import (ChatCompletionMessageParam,
                               ChatCompletionResponseStreamChoice,
                               ChatCompletionStreamResponse,
                               ChatCompletionToolsParam, ChatMessage,
-                              CompletionTokensDetails, DeltaFunctionCall,
-                              PromptTokensDetails, DeltaMessage, DeltaToolCall, UsageInfo,
-                             
+                              DeltaFunctionCall, DeltaMessage, DeltaToolCall,
+                              PromptTokensDetails, UsageInfo,
                               to_disaggregated_params)
 
 # yapf: enable
@@ -678,11 +677,10 @@ class HarmonyAdapter:
                             Role.ASSISTANT,
                             final_content).with_channel("final"))
         else:  # No tool_calls field = final content
-            if (final_content
-                    and final_content.strip()) or (content and content.strip()):
+            if final_content.strip() or content.strip():
                 # Use final content if available, otherwise use raw content
-                actual_content = final_content if (
-                    final_content and final_content.strip()) else content
+                actual_content = final_content if final_content.strip(
+                ) else content
                 messages.append(
                     Message.from_role_and_content(
                         Role.ASSISTANT, actual_content).with_channel("final"))
@@ -1763,13 +1761,10 @@ def handle_streaming_response(tools: List[ChatCompletionToolsParam],
 
 def handle_non_streaming_response(tools: List[ChatCompletionToolsParam],
                                   tool_choice: str,
-                                 
                                   outputs: List,
-                                 
                                   model: str,
                                   num_prompt_tokens: int,
-                                  cached_tokens: int = 0,
-                                  tokenizer=None):
+                                  cached_tokens: int = 0):
     """Handle non-streaming response with harmony format."""
     # Parse harmony output to OpenAI format
     # Convert tools to dictionary format for harmony adapter (standard pattern)
@@ -1814,16 +1809,9 @@ def handle_non_streaming_response(tools: List[ChatCompletionToolsParam],
         # Context only requests don't need a full response message,
         # the real response will be responded by generation server
         response_message = {"role": "assistant", "content": ""}
-        parsed_output = {}
-
-    # Get reasoning text for token counting
-    reasoning_text = parsed_output.get("reasoning", None)
 
     # Create usage info from metrics (RequestOutput doesn't have usage in v1)
-    usage_info = _create_usage_info(num_prompt_tokens,
-                                    outputs, cached_tokens,
-                                    reasoning_text=reasoning_text,
-                                    tokenizer=tokenizer)
+    usage_info = _create_usage_info(num_prompt_tokens, outputs, cached_tokens)
 
     # Create response
     response = ChatCompletionResponse(
@@ -1871,30 +1859,18 @@ def _determine_finish_reason(parsed_output: dict[str, Any],
 
 
 def _create_usage_info(num_prompt_tokens,
-                      
                        outputs,
-                       cached_tokens: int = 0,
-                       reasoning_text: str = None,
-                       tokenizer=None) -> UsageInfo:
+                       cached_tokens: int = 0) -> UsageInfo:
     """Create usage info from RequestOutput following serving_chat.py pattern."""
     # Calculate completion tokens from all outputs
     num_generated_tokens = sum(len(output.token_ids) for output in outputs)
-
-    # Calculate reasoning tokens if reasoning_text is present
-    reasoning_tokens = 0
-    if reasoning_text and tokenizer is not None:
-        reasoning_token_ids = tokenizer.encode(reasoning_text,
-                                               add_special_tokens=False)
-        reasoning_tokens = len(reasoning_token_ids)
 
     # Create usage info
     usage = UsageInfo(
         prompt_tokens=num_prompt_tokens,
         completion_tokens=num_generated_tokens,
         total_tokens=num_prompt_tokens + num_generated_tokens,
-        prompt_tokens_details=PromptTokensDetails(cached_tokens=cached_tokens),
-                      completion_tokens_details=CompletionTokensDetails(
-                          reasoning_tokens=reasoning_tokens))
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=cached_tokens))
     return usage
 
 
