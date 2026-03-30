@@ -596,7 +596,6 @@ def chat_harmony_post_processor(
         model=args.model,
         num_prompt_tokens=args.num_prompt_tokens,
         cached_tokens=rsp.cached_tokens,
-        tokenizer=args.tokenizer,
     )
     return response
 
