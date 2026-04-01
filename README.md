@@ -28,6 +28,9 @@ TensorRT LLM
 * [04/03] DWDP: Distributed Weight Data Parallelism for High-Performance LLM Inference on NVL72
 ✨ [➡️ link](https://nvidia.github.io/TensorRT-LLM/blogs/tech_blog/blog19_DWDP_Distributed_Weight_Data_Parallelism_for_High_Performance_LLM_Inference_on_NVL72.html)
 
+* [04/01] Joint Optimization of Agent Applications and TensorRT-LLM
+✨ [➡️ link](https://github.com/NVIDIA/TensorRT-LLM/blob/main/docs/source/blogs/tech_blog/blog19_Joint_Optimization_of_Agent_Applications_and_TensorRT-LLM.md)
+
 * [03/16] Optimizing MoE Communication with One-Sided AlltoAll Over NVLink
 ✨ [➡️ link](https://nvidia.github.io/TensorRT-LLM/blogs/tech_blog/blog18_Optimizing_MoE_Communication_with_One_Sided_AlltoAll_Over_NVLink.html)
 
