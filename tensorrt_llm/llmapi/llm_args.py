@@ -403,7 +403,8 @@ class SkipSoftmaxAttentionConfig(BaseSparseAttentionConfig):
 
     def resolve_for_target_sparsity(
             self, formula: dict) -> 'SkipSoftmaxAttentionConfig':
-        """
+        """Compute threshold_scale_factor from formula coefficients and target_sparsity.
+
         Given formula coefficients from HF config.json (dict with 'prefill' and
         'decode' keys, each containing 'a' and 'b'), compute threshold_scale_factor
         and return a new SkipSoftmaxAttentionConfig with it set.
@@ -2329,8 +2330,7 @@ SparseAttentionConfig: TypeAlias = Annotated[
 
 @PybindMirror.mirror_pybind_fields(_AgentTreeConfig)
 class AgentTreeConfig(StrictBaseModel, PybindMirror):
-    """
-    Configuration for agent tree scheduling.
+    """Configuration for agent tree scheduling.
 
     Controls how agent requests are scheduled relative to regular chat requests.
     """
@@ -2358,9 +2358,7 @@ class AgentTreeConfig(StrictBaseModel, PybindMirror):
 
 
 class ReorderRequestPolicyConfig(StrictBaseModel):
-    """
-    Configuration for request reordering policy.
-    """
+    """Configuration for request reordering policy."""
     policy_name: Optional[Literal["AgentTree"]] = Field(
         default=None, description="The name of the request reordering policy.")
     policy_args: AgentTreeConfig = Field(

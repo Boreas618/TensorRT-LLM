@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import json
 import os
 from abc import ABC
 from enum import Enum
@@ -7,6 +8,8 @@ from typing import Callable, List, Optional
 
 import httpx
 import openai
+from mcp import ClientSession
+from mcp.client.sse import sse_client
 from transformers import AutoTokenizer
 
 from tensorrt_llm import LLM

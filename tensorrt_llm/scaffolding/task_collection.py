@@ -4,7 +4,7 @@ import time
 from enum import Enum
 from typing import Any, Dict, List, Tuple, Type
 
-from .controller import ParallelProcess
+from .controller import Controller, ParallelProcess
 from .task import ChatTask, DropKVCacheTask, GenerationTask, MCPCallTask, Task
 
 
@@ -28,7 +28,7 @@ class TaskCollection:
 def with_task_collection(name: str, task_collection_cls: Type[TaskCollection],
                          **task_collection_kwargs):
 
-    def decorator(controller_cls: Type["Controller"]):
+    def decorator(controller_cls: Type[Controller]):
         original_init = controller_cls.__init__
         original_process = controller_cls.process
 
@@ -193,8 +193,8 @@ class QueryCollector(TaskCollection):
 
 
 class TaskMetricsCollector(TaskCollection):
-    """
-    Task profiler that captures tasks at yield points, avoiding duplicate counting.
+    """Task profiler that captures tasks at yield points, avoiding duplicate counting.
+
     Records token usage and execution time for each task.
 
     Supports filtering by task types and captures additional fields for ChatTask
@@ -584,7 +584,7 @@ class SubRequestMarker(TaskCollection):
 
 def sub_request_node(node_name: str, is_top_level: bool = False):
 
-    def decorator(controller_cls: Type["Controller"]):
+    def decorator(controller_cls: Type[Controller]):
         controller_cls_with_sub_request_marker = with_task_collection(
             "sub_request_marker",
             SubRequestMarker,
@@ -622,7 +622,7 @@ class DropKVCacheWorkerTag(Enum):
 
 def drop_kv_cache_scope():
 
-    def decorator(controller_cls: Type["Controller"]):
+    def decorator(controller_cls: Type[Controller]):
         controller_cls_with_chat_collection = with_task_collection(
             "ChatCollection", ChatCollection)(controller_cls)
         original_process = controller_cls_with_chat_collection.process
