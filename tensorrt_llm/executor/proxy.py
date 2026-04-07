@@ -92,6 +92,8 @@ class GenerationExecutorProxy(GenerationExecutor):
         self.garbage_collection_gen0_threshold = _llm_args.garbage_collection_gen0_threshold if _llm_args is not None else None
         _backend = None if _llm_args is None else _llm_args.backend
         self._is_pytorch_backend = _backend in ["pytorch", "_autodeploy"]
+        self._enable_resource_governor = bool(
+            getattr(_llm_args, "enable_resource_governor", False))
 
         # Generate RPC address and key for stats RPC
         self.rpc_addr = get_unique_ipc_addr()
@@ -140,21 +142,21 @@ class GenerationExecutorProxy(GenerationExecutor):
             socket_type=zmq.PULL
             if self.enable_postprocess_parallel else zmq.PAIR,
             name="proxy_result_queue")
-        self._kv_cache_control_queue = IpcQueue(
-            is_server=True,
-            name="proxy_control_queue") if self._is_pytorch_backend else None
+        self._resource_governor_queue = IpcQueue(
+            is_server=True, name="proxy_resource_governor_queue"
+        ) if self._enable_resource_governor else None
         # Stats and KV events are now fetched via RPC, not IPC queues.
         return WorkerCommIpcAddrs(
             request_queue_addr=self.request_queue.address,
             worker_init_status_queue_addr=self.worker_init_status_queue.address,
             result_queue_addr=self.result_queue.address,
-            control_queue_addr=self._kv_cache_control_queue.address
-            if self._kv_cache_control_queue is not None else None,
+            resource_governor_queue_addr=self._resource_governor_queue.address
+            if self._resource_governor_queue is not None else None,
         )
 
     @property
-    def kv_cache_control_queue(self):
-        return self._kv_cache_control_queue
+    def resource_governor_queue(self):
+        return self._resource_governor_queue
 
     def abort_request(self, request_id: int) -> None:
         ''' Abort a request by sending a cancelling request to the request queue.
@@ -344,8 +346,8 @@ class GenerationExecutorProxy(GenerationExecutor):
         self.request_queue.close()
         self.worker_init_status_queue.close()
         self.result_queue.close()
-        if self._kv_cache_control_queue is not None:
-            self._kv_cache_control_queue.close()
+        if self._resource_governor_queue is not None:
+            self._resource_governor_queue.close()
 
         self.workers_started = False
         self.mpi_session.shutdown()

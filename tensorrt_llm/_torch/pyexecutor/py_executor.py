@@ -297,6 +297,7 @@ class PyExecutor:
             garbage_collection_gen0_threshold: Optional[int] = None,
             start_worker: bool = True,
             kv_connector_manager: Optional[KvCacheConnectorManager] = None,
+            resource_governor_queue=None,
             max_seq_len: Optional[int] = None,
             peft_cache_config: Optional[PeftCacheConfig] = None,
             virtual_memory_pools: Optional[dict] = None,
@@ -530,14 +531,15 @@ class PyExecutor:
         self.control_request_barrier = threading.Event()
         self.control_action_done = threading.Event()
 
-        # KV cache control plane queue (IpcQueue in multi-process mode,
+        # Resource governor queue (IpcQueue in multi-process mode,
         # IntraProcessQueue in single-process mode) for receiving cache-
-        # management requests (e.g. truncation) from KVCacheControlPlane.
-        # Set via set_kv_cache_control_queue(); the broadcast-based sync
-        # in the decode loop is only active when _kv_cache_control_plane_enabled
-        # is True, so ordinary decoding pays zero collective overhead.
-        self._kv_cache_control_queue = None
-        self._kv_cache_control_plane_enabled = False
+        # management requests (e.g. truncation) from ResourceGovernor.
+        # The decode loop only enters the collective path when the flag is
+        # enabled, so both the queue and the flag must be set before
+        # start_worker() to keep the MPI collective order identical on all
+        # ranks from iteration 0.
+        self._resource_governor_queue = resource_governor_queue
+        self._resource_governor_enabled = resource_governor_queue is not None
 
         self.stats_lock = threading.Lock()
         self.stats = []
@@ -885,15 +887,15 @@ class PyExecutor:
                 self.result_wait_queues[req_id] = result_wait_queue
         return req_id
 
-    def set_kv_cache_control_queue(self, queue):
-        """Wire up the queue used by KVCacheControlPlane and enable the
-        broadcast-based sync path in the decode loop.
+    def set_resource_governor_queue(self, queue):
+        """Swap the queue used by ResourceGovernor.
 
         ``queue`` is an IpcQueue (multi-process / proxy path) or an
-        IntraProcessQueue (single-process / BaseWorker path).
+        IntraProcessQueue (single-process / BaseWorker path). The resource
+        governor enablement flag must already have been established during
+        construction before the worker thread starts.
         """
-        self._kv_cache_control_queue = queue
-        self._kv_cache_control_plane_enabled = True
+        self._resource_governor_queue = queue
 
     def set_gather_responses(self, gather_all_responses):
         self.gather_all_responses = gather_all_responses
@@ -2071,8 +2073,8 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
 
-                if self._kv_cache_control_plane_enabled:
-                    self._sync_and_process_kv_cache_control_queue()
+                if self._resource_governor_enabled:
+                    self._sync_and_process_resource_governor_queue()
 
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
@@ -2274,31 +2276,33 @@ class PyExecutor:
             self.control_action_done.wait()
             self.control_action_done.clear()
 
-    def _sync_and_process_kv_cache_control_queue(self):
-        """Synchronize and process KV cache control requests across all ranks.
+    def _sync_and_process_resource_governor_queue(self):
+        """Synchronize and process resource governor requests across all ranks.
 
-        Only called when ``_kv_cache_control_plane_enabled`` is ``True``.
+        Only called when ``_resource_governor_enabled`` is ``True``.
         Uses a two-phase broadcast: first broadcast the count (a single int),
         then broadcast the actual requests only when count > 0.  This avoids
         serializing and deserializing an empty Python list on every iteration.
         """
         if self.dist.rank == 0:
-            if self._kv_cache_control_queue is not None:
-                control_requests = self._kv_cache_control_queue.drain()
+            if self._resource_governor_queue is not None:
+                resource_governor_requests = self._resource_governor_queue.drain(
+                )
             else:
-                control_requests = []
-            count = len(control_requests)
+                resource_governor_requests = []
+            count = len(resource_governor_requests)
         else:
-            control_requests = None
+            resource_governor_requests = None
             count = 0
 
         count = self.dist.broadcast(count, root=0)
         if count == 0:
             return
 
-        control_requests = self.dist.broadcast(control_requests, root=0)
+        resource_governor_requests = self.dist.broadcast(
+            resource_governor_requests, root=0)
 
-        for request in control_requests:
+        for request in resource_governor_requests:
             if isinstance(request, TruncateKVCacheRequest):
                 self.kv_cache_manager.truncate_blocks(
                     request.messages, len(request.messages_to_retain))
@@ -2348,8 +2352,8 @@ class PyExecutor:
                 if self.enable_iter_perf_stats:
                     iter_start_time = time.time()
 
-                if self._kv_cache_control_plane_enabled:
-                    self._sync_and_process_kv_cache_control_queue()
+                if self._resource_governor_enabled:
+                    self._sync_and_process_resource_governor_queue()
 
                 scheduled_batch, iter_stats = self._prepare_and_schedule_batch()
                 self._handle_control_request()
