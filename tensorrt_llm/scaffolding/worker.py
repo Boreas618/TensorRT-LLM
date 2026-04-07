@@ -192,7 +192,7 @@ class OpenaiWorker(Worker):
         base_url = str(self.async_client.base_url).rstrip("/")
         if base_url.endswith("/v1"):
             base_url = base_url[:-3]
-        url = base_url + "/_control/kv_cache/truncate"
+        url = base_url + "/_resource_governor/truncate"
 
         headers = {}
         if self.async_client.api_key is not None:

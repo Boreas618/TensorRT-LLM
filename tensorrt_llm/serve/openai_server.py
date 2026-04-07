@@ -225,6 +225,7 @@ class OpenAIServer:
         # as disagg-worker
         self.disagg_cluster_storage = None
         self.disagg_cluster_worker = None
+        self.resource_governor = None
 
         # Skip loading AutoProcessor and model_config for VISUAL_GEN models
         # These are LLM-specific and can cause unnecessary memory usage
@@ -298,8 +299,8 @@ class OpenAIServer:
                 logger.info(f"trtllm/{self.generator.llm_id} is unregistered")
             if self.disagg_cluster_worker:
                 await self.disagg_cluster_worker.deregister_worker()
-            if self.kv_cache_control_plane is not None:
-                self.kv_cache_control_plane.close()
+            if self.resource_governor is not None:
+                self.resource_governor.close()
             self.generator.shutdown()
 
         self.app = FastAPI(lifespan=lifespan)
@@ -596,30 +597,31 @@ class OpenAIServer:
         self.app.add_api_route("/kv_cache_events",
                                self.get_kv_cache_events,
                                methods=["POST"])
-        kv_cache_control_queue = self.generator._executor.kv_cache_control_queue
-        if kv_cache_control_queue is not None:
-            from .control_plane import KVCacheControlPlane
-            self.kv_cache_control_plane = KVCacheControlPlane(
-                kv_cache_control_queue=kv_cache_control_queue,
+        resource_governor_queue = self.generator._executor.resource_governor_queue
+        if resource_governor_queue is not None:
+            from .resource_governor import ResourceGovernor
+            self.resource_governor = ResourceGovernor(
+                resource_governor_queue=resource_governor_queue,
                 tokenizer=self.tokenizer,
                 model_config=self.model_config,
                 processor=self.processor,
                 harmony_adapter_factory=get_harmony_adapter
                 if self.use_harmony else None,
             )
-            self.kv_cache_control_plane.register_routes(self.app)
+            self.resource_governor.register_routes(self.app)
         else:
-            # KV cache control plane is unavailable — the executor does not
-            # expose a kv_cache_control_queue.  This is expected in RPC
-            # orchestrator mode (GenerationExecutorRpcProxy) and for
-            # non-PyExecutor backends.  The /_control/* endpoints will not be
-            # registered; clients that attempt to call them will receive 404.
+            # Resource governor is unavailable because the executor does not
+            # expose a resource_governor_queue. This is expected in RPC
+            # orchestrator mode (GenerationExecutorRpcProxy), non-PyExecutor
+            # backends, or when enable_resource_governor is false. The
+            # /_resource_governor/* endpoints will not be registered; clients
+            # that attempt to call them will receive 404.
             logger.warning(
-                "KV cache control plane is disabled: the executor backend "
-                "does not provide a kv_cache_control_queue (e.g. RPC "
-                "orchestrator mode). Endpoints under /_control/ (KV "
-                "cache truncation, etc.) will not be available.")
-            self.kv_cache_control_plane = None
+                "Resource governor is disabled: the executor backend does "
+                "not provide a resource_governor_queue (e.g. RPC "
+                "orchestrator mode or explicit opt-out). Endpoints under "
+                "/_resource_governor/ will not be available.")
+            self.resource_governor = None
 
         self.app.add_api_route("/v1/completions",
                                self.openai_completion,

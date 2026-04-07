@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2023-2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: NVIDIA TensorRT Source Code License Agreement
  *
  * NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
@@ -14,6 +14,7 @@
 #include "tensorrt_llm/batch_manager/llmRequest.h"
 #include "tensorrt_llm/common/cudaUtils.h"
 #include "tensorrt_llm/runtime/samplingConfig.h"
+#include "tensorrt_llm/testing/kvCacheManagerTestUtil.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -149,6 +150,7 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     EXPECT_EQ(llmRequest1->getAllocTotalBlocksPerRequest(), numBlocksTrace1);
 
     // Remove Trace_1 (blocks go to cache for reuse)
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest1);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId1, llmRequest1));
 
     // Step 2: Add Trace_2 to the cache
@@ -162,6 +164,7 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     EXPECT_EQ(llmRequest2->getReusedBlocksPerRequest(), numMatchingBlocks);
 
     // Remove Trace_2 (blocks go to cache for reuse)
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId2, llmRequest2));
 
     // Step 3: Truncate Trace_2 tokens, keeping only System Prompt
@@ -184,6 +187,7 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     EXPECT_EQ(llmRequest3->getReusedBlocksPerRequest(), numAllBlocksTrace1);
     // Context position is the actual number of reused tokens (all 18)
 
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest3);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId3, llmRequest3));
 }
 
@@ -244,6 +248,7 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     auto llmRequestA = createLlmRequest(requestIdA, branchAPtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestIdA, branchALength, beamWidth, llmRequestA));
     EXPECT_EQ(llmRequestA->getReusedBlocksPerRequest(), 0); // First request
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestA);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdA, llmRequestA));
 
     // Add Branch B
@@ -253,6 +258,7 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Branch B should reuse all blocks from the shared prefix (3 blocks)
     // This includes the partial block [8,9,10,?] based on prefix matching
     EXPECT_EQ(llmRequestB->getReusedBlocksPerRequest(), numSharedBlocks); // 3 blocks
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestB);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdB, llmRequestB));
 
     // Truncate Branch B, keeping only the shared prefix
@@ -266,6 +272,7 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Branch A should reuse ALL its blocks (5 blocks including the partial one)
     auto numBlocksBranchA = tc::ceilDiv(branchALength, tokensPerBlock);
     EXPECT_EQ(llmRequestA2->getReusedBlocksPerRequest(), numBlocksBranchA);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestA2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdA2, llmRequestA2));
 
     // Verify Branch B with truncated suffix cannot reuse the truncated blocks
@@ -275,6 +282,7 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // After truncation, Branch B should only reuse the shared prefix blocks (3 blocks)
     // The blocks after the prefix were marked with low priority and may be evicted
     EXPECT_LE(llmRequestB2->getReusedBlocksPerRequest(), numSharedBlocks); // <= 3 blocks
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestB2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdB2, llmRequestB2));
 }
 
@@ -318,6 +326,7 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     LlmRequest::RequestIdType requestId{0};
     auto llmRequest = createLlmRequest(requestId, sequencePtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId, sequenceLength, beamWidth, llmRequest));
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId, llmRequest));
 
     SizeType32 numTokensToKeep = 0;
@@ -332,6 +341,7 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     // This is intentional in the implementation of truncateBlocks, in order to save the partial block
     // at the border of the partial system prompt block.
     EXPECT_LE(llmRequest2->getReusedBlocksPerRequest(), 1);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId2, llmRequest2));
 }
 
@@ -375,6 +385,7 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     LlmRequest::RequestIdType requestId{0};
     auto llmRequest = createLlmRequest(requestId, existingSequencePtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId, existingLength, beamWidth, llmRequest));
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId, llmRequest));
 
     // Try to truncate a non-existent sequence (different tokens)
@@ -386,6 +397,7 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     auto llmRequest2 = createLlmRequest(requestId2, existingSequencePtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId2, existingLength, beamWidth, llmRequest2));
     EXPECT_EQ(llmRequest2->getReusedBlocksPerRequest(), 2); // 8 tokens / 4 tokens per block = 2 blocks
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId2, llmRequest2));
 }
 
@@ -478,6 +490,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto llmRequest1 = createLlmRequest(requestId1, trace1Turn1PrefillPtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId1, trace1Turn1PrefillLength, beamWidth, llmRequest1));
     EXPECT_EQ(llmRequest1->getReusedBlocksPerRequest(), 0); // First request, no reuse
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest1);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId1, llmRequest1));
 
     // --- Event 2: trace_1 decode done (system_prompt + user_input_1 + cot_1 + assistant_output_1) ---
@@ -494,6 +507,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto trace1Turn1DecodeReusedBlocks = llmRequest2->getReusedBlocksPerRequest();
     // Should reuse shared prefix blocks (at least 3 blocks from 14 tokens)
     EXPECT_EQ(trace1Turn1DecodeReusedBlocks, 4);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId2, llmRequest2));
 
     // --- Event 3: trace_2 prefill done (system_prompt + user_input_1) ---
@@ -507,6 +521,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // Should reuse all blocks from shared prefix
     auto sharedPrefixBlocks = tc::ceilDiv(sharedPrefixLength, tokensPerBlock);
     EXPECT_EQ(llmRequest3->getReusedBlocksPerRequest(), sharedPrefixBlocks);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest3);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId3, llmRequest3));
 
     // --- Event 4: trace_2 decode done (system_prompt + user_input_1 + cot_2 + assistant_output_2) ---
@@ -523,6 +538,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // trace_2 diverges from trace_1 after shared prefix (different cot tokens)
     // Should reuse shared prefix blocks but not cot blocks
     EXPECT_EQ(llmRequest4->getReusedBlocksPerRequest(), 4);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest4);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId4, llmRequest4));
 
     // --- Event 5: trace_1 prefill done (system_prompt + user_input_1 + assistant_output_1 + user_input_3) ---
@@ -539,6 +555,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId5, trace1Turn2PrefillLength, beamWidth, llmRequest5));
     // Should reuse shared prefix blocks
     EXPECT_EQ(llmRequest5->getReusedBlocksPerRequest(), 4);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest5);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId5, llmRequest5));
 
     // --- Event 6: trace_1 decode done (+ cot_3 + assistant_output_3) ---
@@ -554,6 +571,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId6, trace1Turn2DecodeLength, beamWidth, llmRequest6));
     auto trace1Turn2DecodeReusedBlocks = llmRequest6->getReusedBlocksPerRequest();
     auto trace1Turn2DecodeAllocBlocks = llmRequest6->getAllocTotalBlocksPerRequest();
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest6);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId6, llmRequest6));
 
     // --- Event 7: trace_2 prefill done (system_prompt + user_input_1 + assistant_output_2 + user_input_4) ---
@@ -568,6 +586,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto llmRequest7 = createLlmRequest(requestId7, trace2Turn2PrefillPtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId7, trace2Turn2PrefillLength, beamWidth, llmRequest7));
     EXPECT_EQ(llmRequest7->getReusedBlocksPerRequest(), 4);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest7);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId7, llmRequest7));
 
     // --- Event 8: trace_2 decode done (+ cot_4 + assistant_output_4) ---
@@ -585,6 +604,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto trace2Turn2DecodeAllocBlocks = llmRequest8->getAllocTotalBlocksPerRequest();
     auto const trace2TotalBlocks = tc::ceilDiv(trace2Turn2DecodeLength, tokensPerBlock);
     EXPECT_EQ(trace2TotalBlocks, 8); // 31 tokens / 4 = 8 blocks
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest8);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId8, llmRequest8));
 
     // --- Truncate trace_1, retaining only system_prompt + user_input_1 ---
@@ -603,6 +623,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // All 8 blocks (31 tokens) should be reused
     EXPECT_EQ(llmRequest9->getReusedBlocksPerRequest(), trace2TotalBlocks);
 
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest9);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId9, llmRequest9));
 
     // --- Additional verification: Shared prefix is still intact ---
@@ -611,6 +632,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto llmRequest10 = createLlmRequest(requestId10, sharedPrefixPtr);
     EXPECT_NO_THROW(kvCacheManager.addSequence(requestId10, sharedPrefixLength, beamWidth, llmRequest10));
     EXPECT_EQ(llmRequest10->getReusedBlocksPerRequest(), sharedPrefixBlockCount);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest10);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId10, llmRequest10));
 
     // --- Verify trace_1's full sequence is no longer fully reusable ---
@@ -621,5 +643,6 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     EXPECT_NO_THROW(
         kvCacheManager.addSequence(requestIdTrace1Verify, trace1Turn2DecodeLength, beamWidth, llmRequestTrace1Verify));
     EXPECT_EQ(llmRequestTrace1Verify->getReusedBlocksPerRequest(), sharedPrefixBlockCount);
+    tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestTrace1Verify);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdTrace1Verify, llmRequestTrace1Verify));
 }

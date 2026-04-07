@@ -3985,6 +3985,14 @@ class TorchLlmArgs(BaseLlmArgs):
         status="prototype",
     )
 
+    enable_resource_governor: bool = Field(
+        default=False,
+        description="Enable the resource governor for runtime cache management "
+        "operations such as KV cache truncation. This adds a per-iteration "
+        "broadcast collective and is enabled automatically by trtllm-serve.",
+        status="prototype",
+    )
+
     # fp8 cute dsl configs
     use_cute_dsl_blockscaling_mm: bool = Field(
         default=False,

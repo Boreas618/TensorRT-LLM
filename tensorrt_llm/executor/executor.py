@@ -371,8 +371,8 @@ class GenerationExecutor(ABC):
         pass
 
     @property
-    def kv_cache_control_queue(self):
-        """Return the KV cache control queue if this executor supports it."""
+    def resource_governor_queue(self):
+        """Return the resource governor queue if this executor supports it."""
         return None
 
     @property

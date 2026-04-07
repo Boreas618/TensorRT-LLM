@@ -11,11 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""KV cache control plane for non-inference runtime operations.
+"""Resource governor for non-inference runtime operations.
 
-Handles KV cache management operations (e.g. truncation), separated from the
-OpenAI-compatible inference server.  Communicates with PyExecutor via a
-dedicated control queue, bypassing the LLM/Proxy/Worker chain.
+Handles runtime cache-management operations such as KV cache truncation,
+separated from the OpenAI-compatible inference server. Communicates with
+PyExecutor via a dedicated resource governor queue, bypassing the
+LLM/Proxy/Worker chain.
 """
 
 import traceback
@@ -32,23 +33,24 @@ from tensorrt_llm.serve.chat_utils import parse_chat_messages_coroutines
 from tensorrt_llm.serve.openai_protocol import KVCacheTruncateRequest
 
 
-class KVCacheControlPlane:
-    """KV cache control plane for runtime cache management operations.
+class ResourceGovernor:
+    """Resource governor for runtime cache management operations.
 
-    Owns a direct channel to the PyExecutor's KV cache control queue,
-    allowing cache-management requests (e.g. truncation) to reach the executor
-    without passing through the LLM API, Proxy, or Worker dispatch chain.
+    Owns a direct channel to the PyExecutor's resource governor queue,
+    allowing cache-management requests such as KV cache truncation to reach the
+    executor without passing through the LLM API, Proxy, or Worker dispatch
+    chain.
     """
 
     def __init__(
         self,
-        kv_cache_control_queue,
+        resource_governor_queue,
         tokenizer,
         model_config,
         processor=None,
         harmony_adapter_factory: Optional[Callable] = None,
     ):
-        self.kv_cache_control_queue = kv_cache_control_queue
+        self.resource_governor_queue = resource_governor_queue
         self.tokenizer = tokenizer
         self.model_config = model_config
         self.processor = processor
@@ -56,29 +58,29 @@ class KVCacheControlPlane:
         self._harmony_adapter = None
 
     def close(self):
-        """Detach the control queue so subsequent requests get 503."""
-        self.kv_cache_control_queue = None
+        """Detach the resource governor queue so subsequent requests get 503."""
+        self.resource_governor_queue = None
 
     def register_routes(self, app: FastAPI):
         if self._harmony_adapter_factory is not None:
             handler = self._truncate_kv_cache_harmony
         else:
             handler = self._truncate_kv_cache
-        app.add_api_route("/_control/kv_cache/truncate", handler, methods=["POST"])
+        app.add_api_route("/_resource_governor/truncate", handler, methods=["POST"])
 
     def _create_error_response(self, message: str, status_code: int) -> JSONResponse:
         return JSONResponse(content={"error": message}, status_code=status_code)
 
     def _put_or_unavailable(self, request: TruncateKVCacheRequest) -> Optional[Response]:
-        """Put a request on the control queue.
+        """Put a request on the resource governor queue.
 
-        Returns ``None`` on success, or a 503 response if the control
-        plane has been closed (e.g. during executor shutdown).
+        Returns ``None`` on success, or a 503 response if the resource
+        governor has been closed (e.g. during executor shutdown).
         """
-        queue = self.kv_cache_control_queue
+        queue = self.resource_governor_queue
         if queue is None:
             return self._create_error_response(
-                "KV cache control plane is shutting down",
+                "Resource governor is shutting down",
                 HTTPStatus.SERVICE_UNAVAILABLE,
             )
         queue.put(request)
