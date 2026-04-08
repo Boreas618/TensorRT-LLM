@@ -265,8 +265,6 @@ def get_llm_args(
         enable_chunked_prefill,
         "enable_attention_dp":
         enable_attention_dp,
-        "enable_resource_governor":
-        True,
         "revision":
         revision,
         "reasoning_parser":
