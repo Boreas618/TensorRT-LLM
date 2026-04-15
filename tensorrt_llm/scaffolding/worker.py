@@ -367,12 +367,6 @@ class TRTLLMWorker(Worker):
     }
 
 
-import json
-
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-
-
 class MCPWorker(Worker):
 
     class ToolCall:
