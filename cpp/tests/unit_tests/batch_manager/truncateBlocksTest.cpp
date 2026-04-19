@@ -80,7 +80,6 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     auto constexpr maxNumSequences = 8;
     auto constexpr blocksInPrimaryPool = 32;
     auto constexpr blocksInSecondaryPool = 0;
-    auto constexpr onboardBlocks = true;
     auto const stream = std::make_shared<tr::CudaStream>();
 
     auto constexpr beamWidth = 1;
@@ -91,7 +90,7 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     // Create KVCacheManager with block reuse enabled
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
         beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */, onboardBlocks);
+        0, stream, maxSequenceLength, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Define token sequences for multi-turn conversations with PARTIAL BLOCKS
@@ -209,7 +208,6 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     auto constexpr maxNumSequences = 8;
     auto constexpr blocksInPrimaryPool = 32;
     auto constexpr blocksInSecondaryPool = 0;
-    auto constexpr onboardBlocks = true;
     auto const stream = std::make_shared<tr::CudaStream>();
 
     auto constexpr beamWidth = 1;
@@ -219,7 +217,7 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
         beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */, onboardBlocks);
+        0, stream, maxSequenceLength, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Shared prefix: tokens 0-10 (11 tokens)
@@ -304,7 +302,6 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     auto constexpr maxNumSequences = 4;
     auto constexpr blocksInPrimaryPool = 16;
     auto constexpr blocksInSecondaryPool = 0;
-    auto constexpr onboardBlocks = true;
     auto const stream = std::make_shared<tr::CudaStream>();
 
     auto constexpr beamWidth = 1;
@@ -314,7 +311,7 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
         beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */, onboardBlocks);
+        0, stream, maxSequenceLength, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Simple sequence: tokens 0-17 (5 blocks)
@@ -363,7 +360,6 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     auto constexpr maxNumSequences = 4;
     auto constexpr blocksInPrimaryPool = 16;
     auto constexpr blocksInSecondaryPool = 0;
-    auto constexpr onboardBlocks = true;
     auto const stream = std::make_shared<tr::CudaStream>();
 
     auto constexpr beamWidth = 1;
@@ -373,7 +369,7 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
         beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */, onboardBlocks);
+        0, stream, maxSequenceLength, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Actual sequence in cache
@@ -437,7 +433,6 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     auto constexpr maxNumSequences = 16;
     auto constexpr blocksInPrimaryPool = 64;
     auto constexpr blocksInSecondaryPool = 0;
-    auto constexpr onboardBlocks = true;
     auto const stream = std::make_shared<tr::CudaStream>();
 
     auto constexpr beamWidth = 1;
@@ -448,7 +443,7 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // Create KVCacheManager with block reuse enabled
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
         beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */, onboardBlocks);
+        0, stream, maxSequenceLength, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Define token sequences for multi-turn conversations
