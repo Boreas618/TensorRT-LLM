@@ -104,3 +104,12 @@ enroot/tensorrt_llm.devel.sqsh
 
 # MacOSX Files
 .DS_Store
+
+# tmp
+swebench_output/
+iter_research_output/
+open_deep_research_output/
+examples/scaffolding/contrib/iter_research/search_datasets/
+examples/scaffolding/contrib/open_deep_research/search_datasets/
+examples/scaffolding/tracing/__Done
+examples/scaffolding/tracing/traces
