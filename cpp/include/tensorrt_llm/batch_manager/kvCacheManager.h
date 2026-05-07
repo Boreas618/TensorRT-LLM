@@ -1177,11 +1177,10 @@ private:
     [[nodiscard]] SizeType32 onboardAndAllocateBlocks(
         GenerationRequest& sequence, LlmRequest& llmRequest, ClaimResult& claimResult, bool isEnableBlockReuse);
 
-    //! \brief Free block and all it's descendants. This makes block a claimed leaf block.
-    void freeChildren(BlockPtr const& block);
-
-    //! \brief Release block and all its descendants from radix tree and put them back to free queue.
-    void releaseChildren(BlockPtr const& block, bool toFront = true);
+    //! \brief Detach \p block and all its descendants from the lookup tree, and return
+    //! unreferenced blocks to the eviction policy at min retention priority.
+    //! \details Caller must hold mLookupTree->getMutex().
+    void releaseSubtree(BlockPtr const& block);
 
     //! \brief Find block least likely to be reused, free it if necessary and return.
     //! \param sequence Sequence which the free block is allocated for

@@ -1161,60 +1161,38 @@ void WindowBlockManager::freeLeafBlock(BlockPtr const& block)
     block->freeLeafBlock();
 }
 
-// Why freeChildren and releaseChildren exist as separate operations
-//
-// Consider a scenario where we know that a block and its children will never be used again.
-// This is based on real-world cases where agent applications spawn sub-agents. When a
-// sub-agent exits, its KV cache can be proactively freed to reduce memory pressure.
-//
-// The goal of releaseChildren is to mark these blocks as "released." When future requests
-// need to claim free blocks, we want to avoid claiming blocks that are still in the radix
-// tree (which could potentially be reused). To achieve this, releaseChildren:
-//   1. Removes each block from the radix tree (freeLeafBlock).
-//   2. Claims the block (claimBlock) — this removes it from its current position in the
-//      free queue and sets its priority to kMinRetentionPriority.
-//   3. Re-inserts the block at the front of the free queue (releaseBlock with toFront),
-//      making it a preferred candidate for reclamation.
-//
-// In contrast, freeChildren only removes blocks from the radix tree and does nothing to the
-// free queue. As a result, these blocks are later reclaimed based on LRU policy (therefore,
-// they are not guaranteed to be the preferred candidates for reclamation), which fails to
-// leverage our knowledge that these blocks from the exited sub-agent will never be reused.
-
-void WindowBlockManager::freeChildren(BlockPtr const& block)
+void WindowBlockManager::releaseSubtree(BlockPtr const& block)
 {
-    if (mEventManager && blockInRadixTree(block))
+    // Iterative pre-order DFS over `block` and all its descendants.  Collect
+    // first, then detach in reverse order: cascade-prune in freeLeafBlock()
+    // removes empty parent nodes from the trie, so leaves must be detached
+    // before their parents to keep the mNextNodes map consistent.
+    std::vector<BlockPtr> subtree;
+    std::vector<BlockPtr> stack{block};
+    while (!stack.empty())
     {
-        mEventManager->enqueueRemovedEvent(block, mWindowSize);
+        auto current = std::move(stack.back());
+        stack.pop_back();
+        for (auto const& [_, child] : current->getNextBlocks())
+        {
+            stack.push_back(child);
+        }
+        subtree.push_back(std::move(current));
     }
 
-    block->freeBlockAndAllDescendants();
-}
-
-void WindowBlockManager::releaseChildren(BlockPtr const& block, bool toFront)
-{
-    for (auto const& p : block->getNextBlocks())
+    for (auto it = subtree.rbegin(); it != subtree.rend(); ++it)
     {
-        auto childBlock = p.second;
-        releaseChildren(childBlock, toFront);
-    }
-
-    if (mEventManager && blockInRadixTree(block))
-    {
-        mEventManager->enqueueRemovedEvent(block, mWindowSize);
-    }
-    freeLeafBlock(block);
-
-    if (!block->hasRefs())
-    {
-        // Remove from current free queue position, then re-insert at front so this block is
-        // reclaimed before blocks that might still be reusable.
-        mEvictionPolicy->claimBlock(block, executor::KvCacheRetentionConfig::kMinRetentionPriority, std::nullopt);
-        mEvictionPolicy->releaseBlock(block, toFront);
-    }
-    else
-    {
-        block->setPriority(executor::KvCacheRetentionConfig::kMinRetentionPriority);
+        auto const& b = *it;
+        if (mEventManager && blockInRadixTree(b))
+        {
+            mEventManager->enqueueRemovedEvent(b, mWindowSize);
+        }
+        b->freeLeafBlock();
+        if (!b->hasRefs())
+        {
+            b->setPriority(executor::KvCacheRetentionConfig::kMinRetentionPriority);
+            mEvictionPolicy->releaseBlock(b, /*toFront=*/true);
+        }
     }
 }
 
@@ -2138,46 +2116,37 @@ void BlockManager::truncateBlocks(
 
 void WindowBlockManager::truncateBlocks(LlmRequest::VecTokens const& targetTokens, SizeType32 numTokensToKeep)
 {
-    std::lock_guard<std::mutex> lock(mCachedBlocksRootMutex);
-    auto numTokens = static_cast<SizeType32>(targetTokens.size());
+    std::lock_guard<std::recursive_mutex> lock(mLookupTree->getMutex());
+
+    auto const numTokens = static_cast<SizeType32>(targetTokens.size());
     auto blockedTokens = chopVectorIntoBlocks<TokenIdType>(targetTokens, numTokens, mTokensPerBlock, true);
-    SizeType32 numMatchedTokens = 0;
 
     std::vector<BlockKey> blockKeys;
+    blockKeys.reserve(blockedTokens.size());
     for (auto const& blockedTokensList : blockedTokens)
     {
         blockKeys.emplace_back(blockedTokensList, std::nullopt);
     }
 
+    SizeType32 numMatchedTokens = 0;
     auto searchRoot = mCachedBlocksRoot;
     for (auto const& blockKey : blockKeys)
     {
-        // dump the tokens of the block key by loop
-        std::string tokenStr;
-        for (auto const& token : blockKey.uniqueTokens)
-        {
-            tokenStr += std::to_string(token.tokenId) + " ";
-        }
-        TLLM_LOG_DEBUG("%s::truncateBlocks - Tokens: %s", mLogPrefix.c_str(), tokenStr.c_str());
-
         auto [partialMatch, numMatched, matchingBlock] = searchRoot != nullptr
             ? searchRoot->findMatchingBlock(blockKey, mEnablePartialReuse, mCopyOnPartialReuse)
             : std::make_tuple(false, 0, nullptr);
-        if (matchingBlock != nullptr)
-        {
-            if (numMatchedTokens > numTokensToKeep)
-            {
-                releaseChildren(matchingBlock);
-                break;
-            }
-
-            numMatchedTokens += numMatched > 0 ? numMatched : blockKey.uniqueTokens.size();
-            searchRoot = matchingBlock;
-        }
-        else
+        if (matchingBlock == nullptr)
         {
             break;
         }
+        if (numMatchedTokens > numTokensToKeep)
+        {
+            matchingBlock->setPriority(executor::KvCacheRetentionConfig::kMinRetentionPriority);
+            releaseSubtree(matchingBlock);
+            break;
+        }
+        numMatchedTokens += (numMatched > 0) ? numMatched : static_cast<SizeType32>(blockKey.uniqueTokens.size());
+        searchRoot = matchingBlock;
     }
 }
 

@@ -89,8 +89,8 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
 
     // Create KVCacheManager with block reuse enabled
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
-        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */);
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, nvinfer1::DataType::kHALF, 0, stream,
+        maxSequenceLength, maxSequenceLength /* chunkSize */, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Define token sequences for multi-turn conversations with PARTIAL BLOCKS
@@ -140,7 +140,8 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     LlmRequest::RequestIdType requestId1{0};
     auto llmRequest1 = createLlmRequest(requestId1, trace1TokensPtr);
 
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId1, trace1Length, beamWidth, llmRequest1));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId1, trace1Length, beamWidth}}}, {std::ref(*llmRequest1)}));
 
     // Trace_1 should have no reused blocks (first request)
     EXPECT_EQ(llmRequest1->getReusedBlocksPerRequest(), 0);
@@ -156,7 +157,8 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     LlmRequest::RequestIdType requestId2{1};
     auto llmRequest2 = createLlmRequest(requestId2, trace2TokensPtr);
 
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId2, trace2Length, beamWidth, llmRequest2));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId2, trace2Length, beamWidth}}}, {std::ref(*llmRequest2)}));
 
     // Trace_2 reuse system prompt blocks as well as a partial match block
     auto numMatchingBlocks = (systemPrompt.size() + tokensPerBlock - 1) / tokensPerBlock;
@@ -175,7 +177,8 @@ TEST_F(TruncateBlocksTest, MultiTurnConversationTruncation)
     LlmRequest::RequestIdType requestId3{2};
     auto llmRequest3 = createLlmRequest(requestId3, trace1TokensPtr);
 
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId3, trace1Length, beamWidth, llmRequest3));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId3, trace1Length, beamWidth}}}, {std::ref(*llmRequest3)}));
 
     // Trace_1 should reuse ALL its blocks (including the last partial block)
     // Because Trace_1 and Trace_2 share System Prompt, but have different subsequent tokens
@@ -216,8 +219,8 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     auto const blocksPerWindow = BlocksPerWindow{{maxAttentionWindow, {blocksInPrimaryPool, blocksInSecondaryPool}}};
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
-        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */);
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, nvinfer1::DataType::kHALF, 0, stream,
+        maxSequenceLength, maxSequenceLength /* chunkSize */, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Shared prefix: tokens 0-10 (11 tokens)
@@ -244,7 +247,8 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Add Branch A
     LlmRequest::RequestIdType requestIdA{0};
     auto llmRequestA = createLlmRequest(requestIdA, branchAPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestIdA, branchALength, beamWidth, llmRequestA));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestIdA, branchALength, beamWidth}}}, {std::ref(*llmRequestA)}));
     EXPECT_EQ(llmRequestA->getReusedBlocksPerRequest(), 0); // First request
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestA);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdA, llmRequestA));
@@ -252,7 +256,8 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Add Branch B
     LlmRequest::RequestIdType requestIdB{1};
     auto llmRequestB = createLlmRequest(requestIdB, branchBPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestIdB, branchBLength, beamWidth, llmRequestB));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestIdB, branchBLength, beamWidth}}}, {std::ref(*llmRequestB)}));
     // Branch B should reuse all blocks from the shared prefix (3 blocks)
     // This includes the partial block [8,9,10,?] based on prefix matching
     EXPECT_EQ(llmRequestB->getReusedBlocksPerRequest(), numSharedBlocks); // 3 blocks
@@ -266,7 +271,8 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Verify Branch A is still fully reusable
     LlmRequest::RequestIdType requestIdA2{2};
     auto llmRequestA2 = createLlmRequest(requestIdA2, branchAPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestIdA2, branchALength, beamWidth, llmRequestA2));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestIdA2, branchALength, beamWidth}}}, {std::ref(*llmRequestA2)}));
     // Branch A should reuse ALL its blocks (5 blocks including the partial one)
     auto numBlocksBranchA = tc::ceilDiv(branchALength, tokensPerBlock);
     EXPECT_EQ(llmRequestA2->getReusedBlocksPerRequest(), numBlocksBranchA);
@@ -276,7 +282,8 @@ TEST_F(TruncateBlocksTest, SharedPrefixTruncation)
     // Verify Branch B with truncated suffix cannot reuse the truncated blocks
     LlmRequest::RequestIdType requestIdB2{3};
     auto llmRequestB2 = createLlmRequest(requestIdB2, branchBPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestIdB2, branchBLength, beamWidth, llmRequestB2));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestIdB2, branchBLength, beamWidth}}}, {std::ref(*llmRequestB2)}));
     // After truncation, Branch B should only reuse the shared prefix blocks (3 blocks)
     // The blocks after the prefix were marked with low priority and may be evicted
     EXPECT_LE(llmRequestB2->getReusedBlocksPerRequest(), numSharedBlocks); // <= 3 blocks
@@ -310,8 +317,8 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     auto const blocksPerWindow = BlocksPerWindow{{maxAttentionWindow, {blocksInPrimaryPool, blocksInSecondaryPool}}};
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
-        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */);
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, nvinfer1::DataType::kHALF, 0, stream,
+        maxSequenceLength, maxSequenceLength /* chunkSize */, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Simple sequence: tokens 0-17 (5 blocks)
@@ -322,7 +329,8 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     // Add the sequence
     LlmRequest::RequestIdType requestId{0};
     auto llmRequest = createLlmRequest(requestId, sequencePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId, sequenceLength, beamWidth, llmRequest));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId, sequenceLength, beamWidth}}}, {std::ref(*llmRequest)}));
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId, llmRequest));
 
@@ -332,7 +340,8 @@ TEST_F(TruncateBlocksTest, CompleteTruncation)
     // Add the same sequence again
     LlmRequest::RequestIdType requestId2{1};
     auto llmRequest2 = createLlmRequest(requestId2, sequencePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId2, sequenceLength, beamWidth, llmRequest2));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId2, sequenceLength, beamWidth}}}, {std::ref(*llmRequest2)}));
 
     // After truncation, only the first block should be reusable
     // This is intentional in the implementation of truncateBlocks, in order to save the partial block
@@ -368,8 +377,8 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     auto const blocksPerWindow = BlocksPerWindow{{maxAttentionWindow, {blocksInPrimaryPool, blocksInSecondaryPool}}};
 
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
-        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */);
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, nvinfer1::DataType::kHALF, 0, stream,
+        maxSequenceLength, maxSequenceLength /* chunkSize */, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Actual sequence in cache
@@ -380,7 +389,8 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     // Add the sequence
     LlmRequest::RequestIdType requestId{0};
     auto llmRequest = createLlmRequest(requestId, existingSequencePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId, existingLength, beamWidth, llmRequest));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId, existingLength, beamWidth}}}, {std::ref(*llmRequest)}));
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId, llmRequest));
 
@@ -391,7 +401,8 @@ TEST_F(TruncateBlocksTest, NonExistentTokensTruncation)
     // Verify the original sequence is still reusable
     LlmRequest::RequestIdType requestId2{1};
     auto llmRequest2 = createLlmRequest(requestId2, existingSequencePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId2, existingLength, beamWidth, llmRequest2));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId2, existingLength, beamWidth}}}, {std::ref(*llmRequest2)}));
     EXPECT_EQ(llmRequest2->getReusedBlocksPerRequest(), 2); // 8 tokens / 4 tokens per block = 2 blocks
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest2);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId2, llmRequest2));
@@ -442,8 +453,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     // Create KVCacheManager with block reuse enabled
     KVCacheManager kvCacheManager(numLayers, numHeads, sizePerHead, tokensPerBlock, blocksPerWindow, maxNumSequences,
-        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, std::nullopt, nvinfer1::DataType::kHALF,
-        0, stream, maxSequenceLength, true /* enableBlockReuse */);
+        beamWidth, std::vector<BlockManager::SizeType32>{maxAttentionWindow}, nvinfer1::DataType::kHALF, 0, stream,
+        maxSequenceLength, maxSequenceLength /* chunkSize */, true /* enableBlockReuse */);
     kvCacheManager.allocatePools(false);
 
     // Define token sequences for multi-turn conversations
@@ -483,7 +494,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId1{0};
     auto llmRequest1 = createLlmRequest(requestId1, trace1Turn1PrefillPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId1, trace1Turn1PrefillLength, beamWidth, llmRequest1));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId1, trace1Turn1PrefillLength, beamWidth}}}, {std::ref(*llmRequest1)}));
     EXPECT_EQ(llmRequest1->getReusedBlocksPerRequest(), 0); // First request, no reuse
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest1);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId1, llmRequest1));
@@ -498,7 +510,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId2{1};
     auto llmRequest2 = createLlmRequest(requestId2, trace1Turn1DecodePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId2, trace1Turn1DecodeLength, beamWidth, llmRequest2));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId2, trace1Turn1DecodeLength, beamWidth}}}, {std::ref(*llmRequest2)}));
     auto trace1Turn1DecodeReusedBlocks = llmRequest2->getReusedBlocksPerRequest();
     // Should reuse shared prefix blocks (at least 3 blocks from 14 tokens)
     EXPECT_EQ(trace1Turn1DecodeReusedBlocks, 4);
@@ -512,7 +525,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId3{2};
     auto llmRequest3 = createLlmRequest(requestId3, trace2Turn1PrefillPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId3, trace2Turn1PrefillLength, beamWidth, llmRequest3));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId3, trace2Turn1PrefillLength, beamWidth}}}, {std::ref(*llmRequest3)}));
     // Should reuse all blocks from shared prefix
     auto sharedPrefixBlocks = tc::ceilDiv(sharedPrefixLength, tokensPerBlock);
     EXPECT_EQ(llmRequest3->getReusedBlocksPerRequest(), sharedPrefixBlocks);
@@ -529,7 +543,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId4{3};
     auto llmRequest4 = createLlmRequest(requestId4, trace2Turn1DecodePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId4, trace2Turn1DecodeLength, beamWidth, llmRequest4));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId4, trace2Turn1DecodeLength, beamWidth}}}, {std::ref(*llmRequest4)}));
     // trace_2 diverges from trace_1 after shared prefix (different cot tokens)
     // Should reuse shared prefix blocks but not cot blocks
     EXPECT_EQ(llmRequest4->getReusedBlocksPerRequest(), 4);
@@ -547,7 +562,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId5{4};
     auto llmRequest5 = createLlmRequest(requestId5, trace1Turn2PrefillPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId5, trace1Turn2PrefillLength, beamWidth, llmRequest5));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId5, trace1Turn2PrefillLength, beamWidth}}}, {std::ref(*llmRequest5)}));
     // Should reuse shared prefix blocks
     EXPECT_EQ(llmRequest5->getReusedBlocksPerRequest(), 4);
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest5);
@@ -563,7 +579,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId6{5};
     auto llmRequest6 = createLlmRequest(requestId6, trace1Turn2DecodePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId6, trace1Turn2DecodeLength, beamWidth, llmRequest6));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId6, trace1Turn2DecodeLength, beamWidth}}}, {std::ref(*llmRequest6)}));
     auto trace1Turn2DecodeReusedBlocks = llmRequest6->getReusedBlocksPerRequest();
     auto trace1Turn2DecodeAllocBlocks = llmRequest6->getAllocTotalBlocksPerRequest();
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest6);
@@ -579,7 +596,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId7{6};
     auto llmRequest7 = createLlmRequest(requestId7, trace2Turn2PrefillPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId7, trace2Turn2PrefillLength, beamWidth, llmRequest7));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId7, trace2Turn2PrefillLength, beamWidth}}}, {std::ref(*llmRequest7)}));
     EXPECT_EQ(llmRequest7->getReusedBlocksPerRequest(), 4);
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest7);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId7, llmRequest7));
@@ -594,7 +612,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
 
     LlmRequest::RequestIdType requestId8{7};
     auto llmRequest8 = createLlmRequest(requestId8, trace2Turn2DecodePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId8, trace2Turn2DecodeLength, beamWidth, llmRequest8));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId8, trace2Turn2DecodeLength, beamWidth}}}, {std::ref(*llmRequest8)}));
     auto trace2Turn2DecodeReusedBlocks = llmRequest8->getReusedBlocksPerRequest();
     auto trace2Turn2DecodeAllocBlocks = llmRequest8->getAllocTotalBlocksPerRequest();
     auto const trace2TotalBlocks = tc::ceilDiv(trace2Turn2DecodeLength, tokensPerBlock);
@@ -612,7 +631,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // --- Verify trace_2 remains completely intact and reusable ---
     LlmRequest::RequestIdType requestId9{8};
     auto llmRequest9 = createLlmRequest(requestId9, trace2Turn2DecodePtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId9, trace2Turn2DecodeLength, beamWidth, llmRequest9));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestId9, trace2Turn2DecodeLength, beamWidth}}}, {std::ref(*llmRequest9)}));
 
     // trace_2's full sequence should still be fully reusable
     // All 8 blocks (31 tokens) should be reused
@@ -625,7 +645,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     LlmRequest::RequestIdType requestId10{9};
     auto sharedPrefixPtr = std::make_shared<VecTokens>(sharedPrefix);
     auto llmRequest10 = createLlmRequest(requestId10, sharedPrefixPtr);
-    EXPECT_NO_THROW(kvCacheManager.addSequence(requestId10, sharedPrefixLength, beamWidth, llmRequest10));
+    EXPECT_NO_THROW(
+        kvCacheManager.addSequenceBatch({{{requestId10, sharedPrefixLength, beamWidth}}}, {std::ref(*llmRequest10)}));
     EXPECT_EQ(llmRequest10->getReusedBlocksPerRequest(), sharedPrefixBlockCount);
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequest10);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestId10, llmRequest10));
@@ -635,8 +656,8 @@ TEST_F(TruncateBlocksTest, ComplexMultiTurnConversationTruncation)
     // should be reusable. Blocks beyond the prefix were removed from the radix trie.
     LlmRequest::RequestIdType requestIdTrace1Verify{10};
     auto llmRequestTrace1Verify = createLlmRequest(requestIdTrace1Verify, trace1Turn2DecodePtr);
-    EXPECT_NO_THROW(
-        kvCacheManager.addSequence(requestIdTrace1Verify, trace1Turn2DecodeLength, beamWidth, llmRequestTrace1Verify));
+    EXPECT_NO_THROW(kvCacheManager.addSequenceBatch(
+        {{{requestIdTrace1Verify, trace1Turn2DecodeLength, beamWidth}}}, {std::ref(*llmRequestTrace1Verify)}));
     EXPECT_EQ(llmRequestTrace1Verify->getReusedBlocksPerRequest(), sharedPrefixBlockCount);
     tensorrt_llm::testing::KvCacheManagerTestUtil::simulatePrefillCompletion(*llmRequestTrace1Verify);
     EXPECT_NO_THROW((void) kvCacheManager.removeSequence(requestIdTrace1Verify, llmRequestTrace1Verify));
