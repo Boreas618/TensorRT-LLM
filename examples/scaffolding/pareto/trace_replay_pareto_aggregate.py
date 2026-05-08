@@ -155,7 +155,28 @@ def _first_nonempty(records: List[Dict[str, Any]], field: str) -> Optional[Any]:
 # ---------------------------------------------------------------------------
 
 
-def _trace_meta(trace_dir: Path) -> Dict[str, Any]:
+# Numeric trace_meta fields aggregated as a round-robin per-session mean
+# when sessions span multiple traces; mirrors the client's _TRACE_META_NUMERIC
+# so plot helpers can multiply the published *_sum field by N to recover
+# realised totals across the mix.
+_TRACE_META_NUMERIC = (
+    "num_events",
+    "assistant_output_tokens_sum",
+    "assistant_turns",
+    "prompt_tokens_assistant_sum",
+    "completion_tokens_sum",
+    "reasoning_tokens_sum",
+    "non_assistant_message_tokens_sum",
+    "tool_call_count",
+    "tool_call_duration_ms_sum",
+    "tool_call_duration_ms_max",
+    "replay_tool_sleep_wall_s_estimated",
+    "drop_kv_cache_events",
+    "trace_file_size_bytes",
+)
+
+
+def _trace_meta_one(trace_dir: Path) -> Dict[str, Any]:
     trace_path = find_compact_trace_file(trace_dir)
     trace = ExecutionTrace.load(str(trace_path))
     return {
@@ -168,6 +189,27 @@ def _trace_meta(trace_dir: Path) -> Dict[str, Any]:
         **summarize_trace_events(trace.events),
         **collect_trace_file_stats(trace_path),
     }
+
+
+def _trace_meta(trace_dirs: List[Path], total_sessions: int) -> Dict[str, Any]:
+    per_trace = [_trace_meta_one(d) for d in trace_dirs]
+    if len(per_trace) == 1:
+        return per_trace[0]
+
+    K = len(per_trace)
+    aggregate: Dict[str, Any] = {}
+    for k in _TRACE_META_NUMERIC:
+        vals = [m.get(k) for m in per_trace]
+        if any(v is None for v in vals):
+            continue
+        aggregate[k] = sum(vals[i % K] for i in range(total_sessions)) / max(
+            total_sessions, 1
+        )
+    aggregate["trace_id"] = "+".join(m["trace_id"] for m in per_trace)
+    aggregate["mix_strategy"] = "round_robin_1to1"
+    aggregate["mix_num_traces"] = K
+    aggregate["traces"] = per_trace
+    return aggregate
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +285,7 @@ def _assemble_combined_record(
         args.model_name or metadata_model,
         args.tensor_parallel_size,
         args.moe_expert_parallel_size,
+        enable_attention_dp=bool(args.enable_attention_dp),
     )
 
     record: Dict[str, Any] = {
@@ -256,10 +299,16 @@ def _assemble_combined_record(
         "aggregator_argv": sys.argv,
         "aggregator_args": {
             "step_jsons": [str(p) for p in step_paths],
-            "trace_dir": str(args.trace_dir) if args.trace_dir else None,
+            "trace_dir": (
+                [str(Path(d).expanduser().resolve()) for d in args.trace_dir]
+                if args.trace_dir
+                else None
+            ),
             "model_name": args.model_name,
             "tensor_parallel_size": args.tensor_parallel_size,
             "moe_expert_parallel_size": args.moe_expert_parallel_size,
+            "enable_attention_dp": bool(args.enable_attention_dp),
+            "enable_chunked_prefill": bool(args.enable_chunked_prefill),
             "output_json": str(output_json),
             "pareto_curve_label": args.pareto_curve_label,
             "no_pareto_png": args.no_pareto_png,
@@ -269,7 +318,7 @@ def _assemble_combined_record(
             "model_name": model_name,
             "tensor_parallel_size": args.tensor_parallel_size,
             "moe_expert_parallel_size": args.moe_expert_parallel_size,
-            "enable_attention_dp": False,
+            "enable_attention_dp": bool(args.enable_attention_dp),
             "filename_suffix": filename_suffix,
         },
         # Plot helpers use cli_args.tensor_parallel_size and
@@ -279,6 +328,8 @@ def _assemble_combined_record(
             **metadata_cli_args,
             "tensor_parallel_size": args.tensor_parallel_size,
             "moe_expert_parallel_size": args.moe_expert_parallel_size,
+            "enable_attention_dp": bool(args.enable_attention_dp),
+            "enable_chunked_prefill": bool(args.enable_chunked_prefill),
         },
         "host": metadata_host,
         "trace_meta": trace_meta,
@@ -286,6 +337,8 @@ def _assemble_combined_record(
             "backend": "trtllm-serve",
             "tensor_parallel_size": args.tensor_parallel_size,
             "moe_expert_parallel_size": args.moe_expert_parallel_size,
+            "enable_attention_dp": bool(args.enable_attention_dp),
+            "enable_chunked_prefill": bool(args.enable_chunked_prefill),
         },
         "trtllm_serve_reference": {
             "base_url": metadata_base_url,
@@ -350,10 +403,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--trace_dir",
         type=Path,
+        nargs="+",
         required=True,
         help=(
-            "Trace directory (same as the one passed to the client); trace_meta "
-            "is recomputed from the *.trace.json here for a clean report."
+            "One or more trace directories — exactly the same set passed to "
+            "the client for these step JSONs. With multiple, trace_meta in "
+            "the combined report is the round-robin per-session mean and "
+            "carries a per-trace `traces` list; with one, the format is "
+            "identical to single-trace reports."
         ),
     )
     p.add_argument(
@@ -376,6 +433,31 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=4,
         help="MoE expert parallel size the server was run with.",
+    )
+    p.add_argument(
+        "--enable_attention_dp",
+        action="store_true",
+        default=False,
+        help=(
+            "Pass this when trtllm-serve was launched with "
+            "--enable_attention_dp (i.e. attention-DP + MoE-EP, e.g. "
+            "\"DP4 + EP4\" on a 4-GPU node). Controls the '_adp' suffix "
+            "in the generated JSON / PNG filenames and is stamped into "
+            "artifact_naming / llm_fixed_config."
+        ),
+    )
+    p.add_argument(
+        "--enable_chunked_prefill",
+        action="store_true",
+        default=False,
+        help=(
+            "Pass this when trtllm-serve was launched with "
+            "--enable_chunked_prefill. Stamped into llm_fixed_config / "
+            "cli_args / aggregator_args as server-side provenance so "
+            "with-vs-without-chunked-prefill sweeps remain distinguishable "
+            "in the combined report. Orthogonal to the parallelism "
+            "topology: it does NOT change the filename suffix."
+        ),
     )
     p.add_argument(
         "--output_json",
@@ -406,8 +488,19 @@ def main() -> int:
         print("error: no step records loaded", file=sys.stderr)
         return 2
 
-    trace_dir = args.trace_dir.expanduser().resolve()
-    trace_meta = _trace_meta(trace_dir)
+    trace_dirs = [Path(d).expanduser().resolve() for d in args.trace_dir]
+    # Use the maximum total_sessions across step rows to weight the
+    # round-robin per-session mean; a per-step exact weighting only matters if
+    # different ladder steps used different N, which the helper script never
+    # does.
+    total_sessions_for_weighting = max(
+        (
+            int(rec.get("run_row", {}).get("total_sessions") or 0)
+            for rec in step_records
+        ),
+        default=0,
+    )
+    trace_meta = _trace_meta(trace_dirs, total_sessions_for_weighting)
 
     output_json = args.output_json.expanduser().resolve()
     record = _assemble_combined_record(
@@ -455,6 +548,26 @@ def main() -> int:
                 print(f"Wrote {png}")
         except Exception as exc:
             print(f"WARNING: agent Pareto PNG failed: {exc!r}", file=sys.stderr)
+
+    write_job = _load_plot_helper(
+        "plot_trace_replay_job_pareto",
+        "write_job_pareto_png_from_json_file",
+    )
+    if write_job is not None:
+        try:
+            png = write_job(
+                output_json,
+                curve_label=args.pareto_curve_label,
+                figure_caption=None,
+                png_path=None,
+            )
+            if png is not None:
+                print(f"Wrote {png}")
+        except Exception as exc:
+            print(
+                f"WARNING: job-throughput Pareto PNG failed: {exc!r}",
+                file=sys.stderr,
+            )
 
     return 0
 

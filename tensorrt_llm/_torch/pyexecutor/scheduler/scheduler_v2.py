@@ -457,10 +457,12 @@ class KVCacheV2Scheduler(RequestScheduler):
         # Skip if already suspended — suspending again is a no-op
         # that frees no pages.
         if self.kv_cache_manager.is_request_active(req.py_request_id):
-            logger.debug(
-                "[V2Scheduler] Self-evicting request %s (state=%s) to free GPU pages",
-                req.py_request_id,
+            logger.info(
+                "[V2Scheduler] Self-evicting request %s (state=%s, prompt_len=%d, generated_tokens=%d) to free GPU pages",
+                req.request_id,
                 req.state,
+                req.prompt_len,
+                req.max_num_generated_tokens,
             )
             self._suspend_request(req)
             evicted.append(req)
@@ -520,11 +522,13 @@ class KVCacheV2Scheduler(RequestScheduler):
                 break
 
             victim = requests_list[victim_idx]
-            logger.debug(
-                "[V2Scheduler] Evicting request %s (state=%s) to free pages for request %s",
-                victim.py_request_id,
+            logger.info(
+                "[V2Scheduler] Evicting request %s (state=%s, prompt_len=%d, generated_tokens=%d) to free pages for request %s",
+                victim.request_id,
                 victim.state,
-                req.py_request_id,
+                victim.prompt_len,
+                victim.max_num_generated_tokens,
+                req.request_id,
             )
             self._suspend_request(victim)
             evicted.append(victim)
